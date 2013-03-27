@@ -299,6 +299,16 @@ struct afe_port_rtproxy_cfg {
 	int	num_ch;		/* 1 to 8 */
 } __packed;
 
+#define AFE_PORT_MULTI_CHAN_HDMI_AUDIO_IF_CONFIG_V2           0x000100F2
+
+/* Structure for the AFE_PORT_MULTI_CHAN_HDMI_AUDIO_IF_CONFIG command. */
+struct afe_port_hdmi_multi_ch_cfg_v2
+{
+   uint16_t                  data_type;
+   uint16_t                  channel_allocation;
+   uint16_t                  bit_width;
+} __packed;
+
 #define AFE_PORT_AUDIO_IF_CONFIG 0x000100d3
 #define AFE_PORT_AUDIO_SLIM_SCH_CONFIG 0x000100e4
 #define AFE_PORT_MULTI_CHAN_HDMI_AUDIO_IF_CONFIG	0x000100D9
@@ -309,6 +319,7 @@ union afe_port_config {
 	struct afe_port_mi2s_cfg          mi2s;
 	struct afe_port_hdmi_cfg          hdmi;
 	struct afe_port_hdmi_multi_ch_cfg hdmi_multi_ch;
+	struct afe_port_hdmi_multi_ch_cfg_v2 hdmi_multi_ch_v2;
 	struct afe_port_slimbus_cfg	  slimbus;
 	struct afe_port_slimbus_sch_cfg	  slim_sch;
 	struct afe_port_rtproxy_cfg       rtproxy;
@@ -561,7 +572,21 @@ struct adm_copp_open_command {
 #define ADM_CMD_COPP_CLOSE                               0x00010305
 
 #define ADM_CMD_MULTI_CHANNEL_COPP_OPEN                  0x00010310
+#define ADM_CMD_MULTI_CHANNEL_COPP_OPEN_V2		 0x00010319
 #define ADM_CMD_MULTI_CHANNEL_COPP_OPEN_V3               0x00010333
+struct adm_multi_ch_copp_open_command_v2 {
+	struct apr_hdr hdr;
+	u16 flags;
+	u16 mode; /* 1-RX, 2-Live TX, 3-Non Live TX */
+	u16 endpoint_id1;
+	u16 endpoint_id2;
+	u32 topology_id;
+	u16 channel_config;
+	u16 bit_width;
+	u32 rate;
+	u8 dev_channel_mapping[8];
+} __packed;
+
 struct adm_multi_ch_copp_open_command {
 	struct apr_hdr hdr;
 	u16 flags;
@@ -753,6 +778,7 @@ struct adm_copp_open_respond {
 } __attribute__ ((packed));
 
 #define ADM_CMDRSP_MULTI_CHANNEL_COPP_OPEN               0x00010311
+#define ADM_CMDRSP_MULTI_CHANNEL_COPP_OPEN_V2            0x0001031A
 #define ADM_CMDRSP_MULTI_CHANNEL_COPP_OPEN_V3            0x00010334
 
 
@@ -1192,6 +1218,7 @@ struct asm_stream_cmd_open_read_compressed {
 } __packed;
 
 #define ASM_STREAM_CMD_OPEN_WRITE                        0x00010BCA
+#define ASM_STREAM_CMD_OPEN_WRITE_V2                     0x00010D8F
 #define ASM_STREAM_CMD_OPEN_WRITE_V2_1                   0x00010DB1
 struct asm_stream_cmd_open_write {
 	struct apr_hdr hdr;
@@ -1201,6 +1228,15 @@ struct asm_stream_cmd_open_write {
 	u32            post_proc_top;
 	u32            format;
 } __attribute__((packed));
+
+struct asm_stream_cmd_open_write_v2 {
+	struct apr_hdr hdr;
+	u32            uMode;
+	u16            sink_endpoint;
+	u16            bits_per_sample;
+	u32            post_proc_top;
+	u32            format;
+} __packed;
 
 #define IEC_61937_MASK	0x00000001
 #define IEC_60958_MASK	0x00000002
