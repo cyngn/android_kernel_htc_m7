@@ -159,6 +159,28 @@ static struct tabla_mbhc_config mbhc_cfg = {
 	.gpio_level_insert = 1,
 };
 
+static inline int param_is_mask(int p)
+{
+	return ((p >= SNDRV_PCM_HW_PARAM_FIRST_MASK) &&
+		(p <= SNDRV_PCM_HW_PARAM_LAST_MASK));
+}
+
+static inline struct snd_mask *param_to_mask(struct snd_pcm_hw_params *p, int n)
+{
+	return &(p->masks[n - SNDRV_PCM_HW_PARAM_FIRST_MASK]);
+}
+
+static void param_set_mask(struct snd_pcm_hw_params *p, int n, unsigned bit)
+{
+	if (bit >= SNDRV_MASK_MAX)
+		return;
+	if (param_is_mask(n)) {
+		struct snd_mask *m = param_to_mask(p, n);
+		m->bits[0] = 0;
+		m->bits[1] = 0;
+		m->bits[bit >> 5] |= (1 << (bit & 31));
+	}
+}
 static void msm_enable_ext_spk_amp_gpio(u32 spk_amp_gpio)
 {
 	int ret = 0;
@@ -807,6 +829,9 @@ static int msm_slim_0_rx_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 			SNDRV_PCM_HW_PARAM_CHANNELS);
 
 	pr_debug("%s()\n", __func__);
+	pr_debug("Fixing the BE DAI format to 24bit\n");
+	param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT,
+		SNDRV_PCM_FORMAT_S24_LE);
 	rate->min = rate->max = 48000;
 	channels->min = channels->max = msm_slim_0_rx_ch;
 
@@ -829,6 +854,7 @@ static int msm_slim_0_tx_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 	return 0;
 }
 
+#ifdef ENABLE_SEC_I2S
 static int msm_be_i2s_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 			struct snd_pcm_hw_params *params)
 {
@@ -840,6 +866,19 @@ static int msm_be_i2s_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 
 	pr_debug("%s()\n", __func__);
 	rate->min = rate->max = 48000;
+	pr_debug("%s mi2s_rate_variable = %d\n", __func__, mi2s_rate_variable);
+	/*Configure the sample rate as 48000 KHz for the LPCM playback*/
+	if (!mi2s_rate_variable) {
+		rate->min = rate->max = 48000;
+		pr_debug("Fixing the BE DAI format to 24bit\n");
+		param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT,
+		SNDRV_PCM_FORMAT_S24_LE);
+	} else {
+		pr_debug("Fixing the BE DAI format to 16bit\n");
+		param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT,
+		SNDRV_PCM_FORMAT_S16_LE);
+	}
+>>>>>>> c492191c... ASOC: msm: 24 Bit playback support
 	channels->min =  channels->max = 2;
 
 	return 0;
@@ -852,6 +891,9 @@ static int msm_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 	SNDRV_PCM_HW_PARAM_RATE);
 
 	pr_debug("%s()\n", __func__);
+	pr_debug("Fixing the BE DAI format to 24bit\n");
+	param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT,
+		SNDRV_PCM_FORMAT_S24_LE);
 	rate->min = rate->max = 48000;
 
 	return 0;
@@ -870,8 +912,16 @@ static int msm_hdmi_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 			channels->min, channels->max);
 
 	/*Configure the sample rate as 48000 KHz for the LPCM playback*/
-	if (!hdmi_rate_variable)
+	if (!hdmi_rate_variable) {
 		rate->min = rate->max = 48000;
+		pr_debug("Fixing the BE DAI format to 24bit\n");
+		param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT,
+			SNDRV_PCM_FORMAT_S24_LE);
+	} else {
+		pr_debug("Fixing the BE DAI format to 16bit\n");
+		param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT,
+		SNDRV_PCM_FORMAT_S16_LE);
+	}
 	channels->min =  channels->max = msm_hdmi_rx_ch;
 
 	return 0;
@@ -982,7 +1032,7 @@ static int mpq8064_sec_i2s_rx_hw_params(struct snd_pcm_substream *substream,
 			clk_set_rate(sec_i2s_rx_bit_clk, bit_clk_set);
 			break;
 		case SNDRV_PCM_FORMAT_S24_LE:
-			bit_clk_set = I2S_MCLK_RATE/(rate * 2 * 24);
+			bit_clk_set = I2S_MCLK_RATE/(rate * 2 * 32);
 			clk_set_rate(sec_i2s_rx_bit_clk, bit_clk_set);
 			break;
 		default:
