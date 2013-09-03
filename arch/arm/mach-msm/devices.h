@@ -394,13 +394,14 @@ extern struct platform_device msm8064_device_watchdog;
 extern struct platform_device msm9615_device_watchdog;
 extern struct platform_device fsm9xxx_device_watchdog;
 
-extern struct platform_device apq8064_qdss_device;
-extern struct platform_device msm_qdss_device;
-extern struct platform_device msm_etb_device;
-extern struct platform_device msm_tpiu_device;
-extern struct platform_device msm_funnel_device;
-extern struct platform_device msm_etm_device;
-extern struct platform_device apq8064_etm_device;
+extern struct platform_device coresight_tpiu_device;
+extern struct platform_device coresight_etb_device;
+extern struct platform_device coresight_funnel_device;
+extern struct platform_device apq8064_coresight_funnel_device;
+extern struct platform_device coresight_etm0_device;
+extern struct platform_device coresight_etm1_device;
+extern struct platform_device coresight_etm2_device;
+extern struct platform_device coresight_etm3_device;
 #endif
 
 extern struct platform_device msm_bus_8064_apps_fabric;
@@ -413,9 +414,9 @@ extern struct platform_device msm_dsps_device_8064;
 extern struct platform_device *msm_8974_stub_regulator_devices[];
 extern int msm_8974_stub_regulator_devices_len;
 
-extern struct platform_device msm8960_cpu_idle_device;
-extern struct platform_device msm8930_cpu_idle_device;
-extern struct platform_device apq8064_cpu_idle_device;
+extern struct platform_device mdm_8064_device;
+extern struct platform_device apq8064_dcvs_device;
+extern struct platform_device apq8064_msm_mpd_device;
 
 extern struct platform_device msm8960_msm_gov_device;
 extern struct platform_device msm8930_msm_gov_device;
@@ -466,3 +467,4 @@ extern struct platform_device msm8960_device_perf_lock;
 extern struct platform_device msm8930_device_perf_lock;
 extern struct platform_device msm8930aa_device_perf_lock;
 #endif
+

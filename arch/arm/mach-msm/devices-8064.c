@@ -89,14 +89,6 @@
 #define PCIE20_PHYS   0x1b500000
 #define PCIE20_SIZE   SZ_4K
 
-#define MDM2AP_ERRFATAL			19
-#define AP2MDM_ERRFATAL			18
-#define MDM2AP_STATUS			49
-#define AP2MDM_STATUS			48
-#define AP2MDM_SOFT_RESET		27
-#define AP2MDM_WAKEUP			35
-#define MDM2AP_PBLRDY			46
-
 #define MSM8064_PC_CNTR_PHYS    (APQ8064_IMEM_PHYS + 0x664)
 #define MSM8064_PC_CNTR_SIZE        0x40
 
@@ -1003,18 +995,6 @@ static struct resource resources_hsic_host[] = {
 		.start	= 47,
 		.end	= 47,
 		.name	= "wakeup",
-		.flags	= IORESOURCE_IO,
-	},
-	{
-		.start	= MDM2AP_ERRFATAL,
-		.end	= MDM2AP_ERRFATAL,
-		.name	= "MDM2AP_ERRFATAL",
-		.flags	= IORESOURCE_IO,
-	},
-	{
-		.start	= MDM2AP_STATUS,
-		.end	= MDM2AP_STATUS,
-		.name	= "MDM2AP_STATUS",
 		.flags	= IORESOURCE_IO,
 	},
 };
@@ -2484,61 +2464,159 @@ struct msm_mpm_device_data apq8064_mpm_dev_data __initdata = {
 };
 #endif
 
+/* AP2MDM_SOFT_RESET is implemented by the PON_RESET_N gpio */
+#define MDM2AP_ERRFATAL         19
+#define AP2MDM_ERRFATAL         18
+#define MDM2AP_STATUS           49
+#define AP2MDM_STATUS           48
+#define AP2MDM_SOFT_RESET       59
+#define I2S_AP2MDM_SOFT_RESET   0
+#define AP2MDM_WAKEUP           66
+#define I2S_AP2MDM_WAKEUP       44
+#define MDM2AP_PBLRDY           84
+#define AMDM2AP_PBLRDY_DSDA2    31
+#define I2S_MDM2AP_PBLRDY       81
 
-static int apq8064_LPM_latency = 1000; 
+static struct resource mdm_resources[] = {
+	{
+		.start  = MDM2AP_ERRFATAL,
+		.end    = MDM2AP_ERRFATAL,
+		.name   = "MDM2AP_ERRFATAL",
+		.flags  = IORESOURCE_IO,
+	},
+	{
+		.start  = AP2MDM_ERRFATAL,
+		.end    = AP2MDM_ERRFATAL,
+		.name   = "AP2MDM_ERRFATAL",
+		.flags  = IORESOURCE_IO,
+	},
+	{
+		.start  = MDM2AP_STATUS,
+		.end    = MDM2AP_STATUS,
+		.name   = "MDM2AP_STATUS",
+		.flags  = IORESOURCE_IO,
+	},
+	{
+		.start  = AP2MDM_STATUS,
+		.end    = AP2MDM_STATUS,
+		.name   = "AP2MDM_STATUS",
+		.flags  = IORESOURCE_IO,
+	},
+	{
+		.start  = AP2MDM_SOFT_RESET,
+		.end    = AP2MDM_SOFT_RESET,
+		.name   = "AP2MDM_SOFT_RESET",
+		.flags  = IORESOURCE_IO,
+	},
+	{
+		.start  = AP2MDM_WAKEUP,
+		.end    = AP2MDM_WAKEUP,
+		.name   = "AP2MDM_WAKEUP",
+		.flags  = IORESOURCE_IO,
+	},
+	{
+		.start  = MDM2AP_PBLRDY,
+		.end    = MDM2AP_PBLRDY,
+		.name   = "MDM2AP_PBLRDY",
+		.flags  = IORESOURCE_IO,
+	},
+};
 
-struct platform_device apq8064_cpu_idle_device = {
-	.name   = "msm_cpu_idle",
+struct platform_device mdm_8064_device = {
+	.name       = "mdm2_modem",
 	.id     = -1,
-	.dev = {
-		.platform_data = &apq8064_LPM_latency,
+	.num_resources  = ARRAY_SIZE(mdm_resources),
+	.resource   = mdm_resources,
+};
+
+static struct msm_dcvs_sync_rule apq8064_dcvs_sync_rules[] = {
+	{1026000,   400000},
+	{384000,    200000},
+	{0,     128000},
+};
+
+static struct msm_dcvs_platform_data apq8064_dcvs_data = {
+	.sync_rules = apq8064_dcvs_sync_rules,
+	.num_sync_rules = ARRAY_SIZE(apq8064_dcvs_sync_rules),
+	.gpu_max_nom_khz = 320000,
+};
+
+struct platform_device apq8064_dcvs_device = {
+	.name       = "dcvs",
+	.id     = -1,
+	.dev        = {
+		.platform_data = &apq8064_dcvs_data,
 	},
 };
 
 static struct msm_dcvs_core_info apq8064_core_info = {
-	.num_cores		= 4,
-	.sensors		= (int[]){7, 8, 9, 10},
-	.thermal_poll_ms	= 60000,
-	.core_param		= {
-		.core_type	= MSM_DCVS_CORE_TYPE_CPU,
+	.num_cores      = 4,
+	.sensors        = (int[]){7, 8, 9, 10},
+	.thermal_poll_ms    = 60000,
+	.core_param     = {
+		.core_type  = MSM_DCVS_CORE_TYPE_CPU,
 	},
-	.algo_param		= {
-		.disable_pc_threshold		= 1458000,
-		.em_win_size_min_us		= 100000,
-		.em_win_size_max_us		= 300000,
-		.em_max_util_pct		= 97,
-		.group_id			= 1,
-		.max_freq_chg_time_us		= 100000,
-		.slack_mode_dynamic		= 0,
-		.slack_weight_thresh_pct	= 3,
-		.slack_time_min_us		= 45000,
-		.slack_time_max_us		= 45000,
-		.ss_no_corr_below_freq		= 0,
-		.ss_win_size_min_us		= 1000000,
-		.ss_win_size_max_us		= 1000000,
-		.ss_util_pct			= 95,
+	.algo_param     = {
+		.disable_pc_threshold       = 1458000,
+		.em_win_size_min_us     = 100000,
+		.em_win_size_max_us     = 300000,
+		.em_max_util_pct        = 97,
+		.group_id           = 1,
+		.max_freq_chg_time_us       = 100000,
+		.slack_mode_dynamic     = 0,
+		.slack_weight_thresh_pct    = 3,
+		.slack_time_min_us      = 45000,
+		.slack_time_max_us      = 45000,
+		.ss_no_corr_below_freq      = 0,
+		.ss_win_size_min_us     = 1000000,
+		.ss_win_size_max_us     = 1000000,
+		.ss_util_pct            = 95,
 	},
-	.energy_coeffs		= {
-		.active_coeff_a		= 336,
-		.active_coeff_b		= 0,
-		.active_coeff_c		= 0,
+	.energy_coeffs      = {
+		.active_coeff_a     = 336,
+		.active_coeff_b     = 0,
+		.active_coeff_c     = 0,
 
-		.leakage_coeff_a	= -17720,
-		.leakage_coeff_b	= 37,
-		.leakage_coeff_c	= 3329,
-		.leakage_coeff_d	= -277,
+		.leakage_coeff_a    = -17720,
+		.leakage_coeff_b    = 37,
+		.leakage_coeff_c    = 3329,
+		.leakage_coeff_d    = -277,
 	},
-	.power_param		= {
-		.current_temp	= 25,
-		.num_freq	= 0, /* set at runtime */
+	.power_param        = {
+		.current_temp   = 25,
+		.num_freq   = 0, /* set at runtime */
 	}
+};
+
+#define APQ8064_LPM_LATENCY  1000 /* >100 usec for WFI */
+
+static struct msm_gov_platform_data gov_platform_data = {
+	.info = &apq8064_core_info,
+	.latency = APQ8064_LPM_LATENCY,
 };
 
 struct platform_device apq8064_msm_gov_device = {
 	.name = "msm_dcvs_gov",
 	.id = -1,
 	.dev = {
-		.platform_data = &apq8064_core_info,
+		.platform_data = &gov_platform_data,
+	},
+};
+
+static struct msm_mpd_algo_param apq8064_mpd_algo_param = {
+	.em_win_size_min_us = 10000,
+	.em_win_size_max_us = 100000,
+	.em_max_util_pct    = 90,
+	.online_util_pct_min    = 60,
+	.slack_time_min_us  = 50000,
+	.slack_time_max_us  = 100000,
+};
+
+struct platform_device apq8064_msm_mpd_device = {
+	.name   = "msm_mpdecision",
+	.id = -1,
+	.dev    = {
+		.platform_data = &apq8064_mpd_algo_param,
 	},
 };
 
@@ -2681,6 +2759,107 @@ struct platform_device apq8064_device_cache_erp = {
 	.id		= -1,
 	.num_resources	= ARRAY_SIZE(msm_cache_erp_resources),
 	.resource	= msm_cache_erp_resources,
+};
+
+#define CORESIGHT_PHYS_BASE     0x01A00000
+#define CORESIGHT_FUNNEL_PHYS_BASE  (CORESIGHT_PHYS_BASE + 0x4000)
+#define CORESIGHT_ETM2_PHYS_BASE    (CORESIGHT_PHYS_BASE + 0x1E000)
+#define CORESIGHT_ETM3_PHYS_BASE    (CORESIGHT_PHYS_BASE + 0x1F000)
+
+static struct resource coresight_funnel_resources[] = {
+    {
+        .start = CORESIGHT_FUNNEL_PHYS_BASE,
+        .end   = CORESIGHT_FUNNEL_PHYS_BASE + SZ_4K - 1,
+        .flags = IORESOURCE_MEM,
+    },
+};
+
+static const int coresight_funnel_outports[] = { 0, 1 };
+static const int coresight_funnel_child_ids[] = { 0, 1 };
+static const int coresight_funnel_child_ports[] = { 0, 0 };
+
+static struct coresight_platform_data coresight_funnel_pdata = {
+    .id     = 2,
+    .name       = "coresight-funnel",
+    .nr_inports = 8,
+    .outports   = coresight_funnel_outports,
+    .child_ids  = coresight_funnel_child_ids,
+    .child_ports    = coresight_funnel_child_ports,
+    .nr_outports    = ARRAY_SIZE(coresight_funnel_outports),
+};
+
+struct platform_device apq8064_coresight_funnel_device = {
+    .name          = "coresight-funnel",
+    .id            = 0,
+    .num_resources = ARRAY_SIZE(coresight_funnel_resources),
+    .resource      = coresight_funnel_resources,
+    .dev = {
+        .platform_data = &coresight_funnel_pdata,
+    },
+};
+
+static struct resource coresight_etm2_resources[] = {
+    {
+        .start = CORESIGHT_ETM2_PHYS_BASE,
+        .end   = CORESIGHT_ETM2_PHYS_BASE + SZ_4K - 1,
+        .flags = IORESOURCE_MEM,
+    },
+};
+
+static const int coresight_etm2_outports[] = { 0 };
+static const int coresight_etm2_child_ids[] = { 2 };
+static const int coresight_etm2_child_ports[] = { 4 };
+
+static struct coresight_platform_data coresight_etm2_pdata = {
+    .id     = 6,
+    .name       = "coresight-etm2",
+    .nr_inports = 0,
+    .outports   = coresight_etm2_outports,
+    .child_ids  = coresight_etm2_child_ids,
+    .child_ports    = coresight_etm2_child_ports,
+    .nr_outports    = ARRAY_SIZE(coresight_etm2_outports),
+};
+
+struct platform_device coresight_etm2_device = {
+    .name          = "coresight-etm",
+    .id            = 2,
+    .num_resources = ARRAY_SIZE(coresight_etm2_resources),
+    .resource      = coresight_etm2_resources,
+    .dev = {
+        .platform_data = &coresight_etm2_pdata,
+    },
+};
+
+static struct resource coresight_etm3_resources[] = {
+    {
+        .start = CORESIGHT_ETM3_PHYS_BASE,
+        .end   = CORESIGHT_ETM3_PHYS_BASE + SZ_4K - 1,
+        .flags = IORESOURCE_MEM,
+    },
+};
+
+static const int coresight_etm3_outports[] = { 0 };
+static const int coresight_etm3_child_ids[] = { 2 };
+static const int coresight_etm3_child_ports[] = { 5 };
+
+static struct coresight_platform_data coresight_etm3_pdata = {
+    .id     = 7,
+    .name       = "coresight-etm3",
+    .nr_inports = 0,
+    .outports   = coresight_etm3_outports,
+    .child_ids  = coresight_etm3_child_ids,
+    .child_ports    = coresight_etm3_child_ports,
+    .nr_outports    = ARRAY_SIZE(coresight_etm3_outports),
+};
+
+struct platform_device coresight_etm3_device = {
+    .name          = "coresight-etm",
+    .id            = 3,
+    .num_resources = ARRAY_SIZE(coresight_etm3_resources),
+    .resource      = coresight_etm3_resources,
+    .dev = {
+        .platform_data = &coresight_etm3_pdata,
+    },
 };
 
 struct msm_iommu_domain_name apq8064_iommu_ctx_names[] = {

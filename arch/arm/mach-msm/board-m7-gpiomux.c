@@ -739,70 +739,95 @@ static struct msm_gpiomux_config m7_ext_regulator_configs[] __initdata = {
 };
 #endif
 
-#if 0
 static struct gpiomux_setting ap2mdm_cfg = {
-	.func = GPIOMUX_FUNC_GPIO,
-	.drv = GPIOMUX_DRV_8MA,
-	.pull = GPIOMUX_PULL_DOWN,
+    .func = GPIOMUX_FUNC_GPIO,
+    .drv = GPIOMUX_DRV_4MA,
+    .pull = GPIOMUX_PULL_DOWN,
 };
 
 static struct gpiomux_setting mdm2ap_status_cfg = {
-	.func = GPIOMUX_FUNC_GPIO,
-	.drv = GPIOMUX_DRV_8MA,
-	.pull = GPIOMUX_PULL_NONE,
+    .func = GPIOMUX_FUNC_GPIO,
+    .drv = GPIOMUX_DRV_2MA,
+    .pull = GPIOMUX_PULL_DOWN,
 };
 
 static struct gpiomux_setting mdm2ap_errfatal_cfg = {
-	.func = GPIOMUX_FUNC_GPIO,
-	.drv = GPIOMUX_DRV_16MA,
-	.pull = GPIOMUX_PULL_DOWN,
+    .func = GPIOMUX_FUNC_GPIO,
+    .drv = GPIOMUX_DRV_2MA,
+    .pull = GPIOMUX_PULL_DOWN,
 };
 
-static struct gpiomux_setting ap2mdm_pon_reset_n_cfg = {
-	.func = GPIOMUX_FUNC_GPIO,
-	.drv = GPIOMUX_DRV_8MA,
-	.pull = GPIOMUX_PULL_UP,
-	.dir = GPIOMUX_OUT_HIGH,
+static struct gpiomux_setting mdm2ap_pblrdy = {
+    .func = GPIOMUX_FUNC_GPIO,
+    .drv = GPIOMUX_DRV_2MA,
+    .pull = GPIOMUX_PULL_DOWN,
+};
+
+
+static struct gpiomux_setting ap2mdm_soft_reset_cfg = {
+    .func = GPIOMUX_FUNC_GPIO,
+    .drv = GPIOMUX_DRV_4MA,
+    .pull = GPIOMUX_PULL_DOWN,
+};
+
+static struct gpiomux_setting ap2mdm_wakeup = {
+    .func = GPIOMUX_FUNC_GPIO,
+    .drv = GPIOMUX_DRV_4MA,
+    .pull = GPIOMUX_PULL_DOWN,
 };
 
 static struct msm_gpiomux_config mdm_configs[] __initdata = {
-	
-	{
-		.gpio = 48,
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &ap2mdm_cfg,
-		}
-	},
-	
-	{
-		.gpio = 49,
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &mdm2ap_status_cfg,
-		}
-	},
-	
-	{
-		.gpio = 19,
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &mdm2ap_errfatal_cfg,
-		}
-	},
-	
-	{
-		.gpio = 18,
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &ap2mdm_cfg,
-		}
-	},
-	
-	{
-		.gpio = 59,
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &ap2mdm_pon_reset_n_cfg,
-		}
-	},
+    /* AP2MDM_STATUS */
+    {
+        .gpio = 48,
+        .settings = {
+            [GPIOMUX_SUSPENDED] = &ap2mdm_cfg,
+        }
+    },
+    /* MDM2AP_STATUS */
+    {
+        .gpio = 49,
+        .settings = {
+            [GPIOMUX_ACTIVE] = &mdm2ap_status_cfg,
+            [GPIOMUX_SUSPENDED] = &mdm2ap_status_cfg,
+        }
+    },
+    /* MDM2AP_ERRFATAL */
+    {
+        .gpio = 19,
+        .settings = {
+            [GPIOMUX_SUSPENDED] = &mdm2ap_errfatal_cfg,
+        }
+    },
+    /* AP2MDM_ERRFATAL */
+    {
+        .gpio = 18,
+        .settings = {
+            [GPIOMUX_SUSPENDED] = &ap2mdm_cfg,
+        }
+    },
+    /* AP2MDM_SOFT_RESET, aka AP2MDM_PON_RESET_N */
+    {
+        .gpio = 59,
+        .settings = {
+            [GPIOMUX_SUSPENDED] = &ap2mdm_soft_reset_cfg,
+        }
+    },
+    /* AP2MDM_WAKEUP */
+    {
+        .gpio = 66,
+        .settings = {
+            [GPIOMUX_SUSPENDED] = &ap2mdm_wakeup,
+        }
+    },
+    /* MDM2AP_PBL_READY*/
+    {
+        .gpio = 84,
+        .settings = {
+            [GPIOMUX_SUSPENDED] = &mdm2ap_pblrdy,
+        }
+    },
 };
-#endif
 
 static struct gpiomux_setting gpio_rotate_key_act_config = {
 	.pull = GPIOMUX_PULL_UP,
@@ -917,11 +942,8 @@ void __init m7_init_gpiomux(void)
                         ARRAY_SIZE(mhl_configs));
 #endif
 
-
-#if 0
 	msm_gpiomux_install(mdm_configs,
 		ARRAY_SIZE(mdm_configs));
-#endif
 
 #ifdef CONFIG_USB_EHCI_MSM_HSIC
 	msm_gpiomux_install(m7_hsic_configs,

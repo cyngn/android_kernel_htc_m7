@@ -95,6 +95,7 @@
 #include "rpm_resources.h"
 #include "pm.h"
 #include "pm-boot.h"
+#include "sysmon.h"
 #include <mach/board_htc.h>
 #include <mach/htc_util.h>
 #include <mach/cable_detect.h>
@@ -778,64 +779,6 @@ static void __init reserve_ion_memory(void)
 	}
 #endif
 }
-
-static struct resource mdm_resources[] = {
-	{
-		.start	= MDM2AP_ERR_FATAL,
-		.end		= MDM2AP_ERR_FATAL,
-		.name	= "MDM2AP_ERRFATAL",
-		.flags	= IORESOURCE_IO,
-	},
-	{
-		.start	= AP2MDM_ERR_FATAL,
-		.end		= AP2MDM_ERR_FATAL,
-		.name	= "AP2MDM_ERRFATAL",
-		.flags	= IORESOURCE_IO,
-	},
-	{
-		.start	= MDM2AP_STATUS,
-		.end		= MDM2AP_STATUS,
-		.name	= "MDM2AP_STATUS",
-		.flags	= IORESOURCE_IO,
-	},
-	{
-		.start	= AP2MDM_STATUS,
-		.end		= AP2MDM_STATUS,
-		.name	= "AP2MDM_STATUS",
-		.flags	= IORESOURCE_IO,
-	},
-	{
-		.start	= AP2MDM_PON_RESET_N,
-		.end		= AP2MDM_PON_RESET_N,
-		.name	= "AP2MDM_PMIC_RESET_N",
-		.flags	= IORESOURCE_IO,
-	},
-	{
-		.start	= MDM2AP_HSIC_READY,
-		.end		= MDM2AP_HSIC_READY,
-		.name	= "MDM2AP_HSIC_READY",
-		.flags	= IORESOURCE_IO,
-	},
-	{
-		.start	= AP2MDM_WAKEUP,
-		.end		= AP2MDM_WAKEUP,
-		.name	= "AP2MDM_WAKEUP",
-		.flags	= IORESOURCE_IO,
-	},
-	{
-		.start  = APQ2MDM_IPC1,
-		.end    = APQ2MDM_IPC1,
-		.name   = "AP2MDM_IPC1",
-		.flags  = IORESOURCE_IO,
-	},
-};
-
-static struct platform_device mdm_8064_device = {
-	.name		= "mdm2_modem",
-	.id		= -1,
-	.num_resources	= ARRAY_SIZE(mdm_resources),
-	.resource	= mdm_resources,
-};
 
 #ifdef CONFIG_BT
 static struct msm_serial_hs_platform_data msm_uart_dm6_pdata = {
@@ -3746,20 +3689,30 @@ static struct mdm_vddmin_resource mdm_vddmin_rscs = {
 	.mdm2ap_vddmin_gpio = 80,
 };
 
+static struct gpiomux_setting mdm2ap_status_gpio_run_cfg = {
+	.func = GPIOMUX_FUNC_GPIO,
+	.drv = GPIOMUX_DRV_2MA,
+	.pull = GPIOMUX_PULL_NONE,
+};
+
 static struct mdm_platform_data mdm_platform_data = {
 	.mdm_version = "3.0",
 	.ramdump_delay_ms = 2000,
+	.early_power_on = 1,
+	.sfr_query = 1,
+	.send_shdn = 1,
 	.vddmin_resource = &mdm_vddmin_rscs,
 	.peripheral_platform_device = &apq8064_device_hsic_host,
 	.ramdump_timeout_ms = 120000,
+	.mdm2ap_status_gpio_run_cfg = &mdm2ap_status_gpio_run_cfg,
+	.sysmon_subsys_id_valid = 1,
+	.sysmon_subsys_id = SYSMON_SS_EXT_MODEM,
 };
 
 static struct tsens_platform_data apq_tsens_pdata  = {
-		.tsens_factor		= 1000,
-		.hw_type		= APQ_8064,
-		.patherm0               = -1,
-		.patherm1               = -1,
-		.tsens_num_sensor	= 11,
+		.tsens_factor       = 1000,
+		.hw_type        = APQ_8064,
+		.tsens_num_sensor   = 11,
 		.slope = {1176, 1176, 1154, 1176, 1111,
 			1132, 1132, 1199, 1132, 1199, 1132},
 };
@@ -3770,11 +3723,14 @@ static struct platform_device msm_tsens_device = {
 };
 
 static struct msm_thermal_data msm_thermal_pdata = {
-	.sensor_id = 0,
-	.poll_ms = 1000,
-	.limit_temp = 51,
-	.temp_hysteresis = 10,
-	.limit_freq = 918000,
+	.sensor_id = 7,
+	.poll_ms = 250,
+	.limit_temp_degC = 60,
+	.temp_hysteresis_degC = 10,
+	.freq_step = 2,
+	.core_limit_temp_degC = 80,
+	.core_temp_hysteresis_degC = 10,
+	.core_control_mask = 0xe,
 };
 
 #define MSM_SHARED_RAM_PHYS 0x80000000
@@ -4224,6 +4180,7 @@ static struct platform_device m7_device_ext_mpp8_vreg __devinitdata = {
 	},
 };
 
+#if 0
 static struct platform_device m7_device_ext_ts_sw_vreg __devinitdata = {
 	.name	= GPIO_REGULATOR_DEV_NAME,
 	.id	= PM8921_GPIO_PM_TO_SYS(23),
@@ -4232,6 +4189,8 @@ static struct platform_device m7_device_ext_ts_sw_vreg __devinitdata = {
 			= &m7_gpio_regulator_pdata[GPIO_VREG_ID_EXT_TS_SW],
 	},
 };
+#endif
+
 
 static struct platform_device m7_device_rpm_regulator __devinitdata = {
 	.name	= "rpm-regulator",
@@ -4457,7 +4416,7 @@ static struct platform_device *common_devices[] __initdata = {
 #endif
 	&m7_device_ext_5v_vreg,
 	&m7_device_ext_mpp8_vreg,
-	&m7_device_ext_ts_sw_vreg,
+	//&m7_device_ext_ts_sw_vreg,
 	&apq8064_device_ssbi_pmic1,
 	&apq8064_device_ssbi_pmic2,
 	&msm_device_smd_apq8064,
@@ -4571,8 +4530,8 @@ static struct platform_device *common_devices[] __initdata = {
 #ifdef CONFIG_MSM_ROTATOR
 	&msm_rotator_device,
 #endif
-	&msm8960_cpu_idle_device,
-	&msm8960_msm_gov_device,
+	&apq8064_dcvs_device,
+	&apq8064_msm_gov_device,
 	&msm_tsens_device,
 	&msm_device_tz_log,
 	&apq8064_iommu_domain_device,
@@ -4587,6 +4546,14 @@ static struct platform_device *common_devices[] __initdata = {
 	&apq_lowlatency_pcm,
 	&msm8064_pc_cntr,
 	&msm8064_cpu_slp_status,
+	&coresight_tpiu_device,
+	&coresight_etb_device,
+	&apq8064_coresight_funnel_device,
+	&coresight_etm0_device,
+	&coresight_etm1_device,
+	&coresight_etm2_device,
+	&coresight_etm3_device,
+	&apq8064_msm_mpd_device,
 };
 
 static struct platform_device *cdp_devices[] __initdata = {
