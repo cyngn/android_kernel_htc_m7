@@ -38,7 +38,7 @@ long ext4_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		handle_t *handle = NULL;
 		int err, migrate = 0;
 		struct ext4_iloc iloc;
-		unsigned int oldflags, mask, i;
+		unsigned int oldflags;
 		unsigned int jflag;
 
 		if (!inode_owner_or_capable(inode))
@@ -55,38 +55,48 @@ long ext4_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 		err = -EPERM;
 		mutex_lock(&inode->i_mutex);
-		
+		/* Is it quota file? Do not allow user to mess with it */
 		if (IS_NOQUOTA(inode))
 			goto flags_out;
 
 		oldflags = ei->i_flags;
 
-		
+		/* The JOURNAL_DATA flag is modifiable only by root */
 		jflag = flags & EXT4_JOURNAL_DATA_FL;
 
+		/*
+		 * The IMMUTABLE and APPEND_ONLY flags can only be changed by
+		 * the relevant capability.
+		 *
+		 * This test looks nicer. Thanks to Pauline Middelink
+		 */
 		if ((flags ^ oldflags) & (EXT4_APPEND_FL | EXT4_IMMUTABLE_FL)) {
 			if (!capable(CAP_LINUX_IMMUTABLE))
 				goto flags_out;
 		}
 
+		/*
+		 * The JOURNAL_DATA flag can only be changed by
+		 * the relevant capability.
+		 */
 		if ((jflag ^ oldflags) & (EXT4_JOURNAL_DATA_FL)) {
 			if (!capable(CAP_SYS_RESOURCE))
 				goto flags_out;
 		}
 		if (oldflags & EXT4_EXTENTS_FL) {
-			
+			/* We don't support clearning extent flags */
 			if (!(flags & EXT4_EXTENTS_FL)) {
 				err = -EOPNOTSUPP;
 				goto flags_out;
 			}
 		} else if (flags & EXT4_EXTENTS_FL) {
-			
+			/* migrate the file */
 			migrate = 1;
 			flags &= ~EXT4_EXTENTS_FL;
 		}
 
 		if (flags & EXT4_EOFBLOCKS_FL) {
-			
+			/* we don't support adding EOFBLOCKS flag */
 			if (!(oldflags & EXT4_EOFBLOCKS_FL)) {
 				err = -EOPNOTSUPP;
 				goto flags_out;
@@ -105,14 +115,9 @@ long ext4_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		if (err)
 			goto flags_err;
 
-		for (i = 0, mask = 1; i < 32; i++, mask <<= 1) {
-			if (!(mask & EXT4_FL_USER_MODIFIABLE))
-				continue;
-			if (mask & flags)
-				ext4_set_inode_flag(inode, i);
-			else
-				ext4_clear_inode_flag(inode, i);
-		}
+		flags = flags & EXT4_FL_USER_MODIFIABLE;
+		flags |= oldflags & ~EXT4_FL_USER_MODIFIABLE;
+		ei->i_flags = flags;
 
 		ext4_set_inode_flags(inode);
 		inode->i_ctime = ext4_current_time(inode);
@@ -251,6 +256,7 @@ group_extend_out:
 		err = ext4_move_extents(filp, donor_filp, me.orig_start,
 					me.donor_start, me.len, &me.moved_len);
 		mnt_drop_write_file(filp);
+		mnt_drop_write(filp->f_path.mnt);
 
 		if (copy_to_user((struct move_extent __user *)arg,
 				 &me, sizeof(me)))
@@ -309,6 +315,12 @@ group_add_out:
 		err = mnt_want_write_file(filp);
 		if (err)
 			return err;
+		/*
+		 * inode_mutex prevent write and truncate on the file.
+		 * Read still goes through. We take i_data_sem in
+		 * ext4_ext_swap_inode_data before we switch the
+		 * inode format to prevent read.
+		 */
 		mutex_lock(&(inode->i_mutex));
 		err = ext4_ext_migrate(inode);
 		mutex_unlock(&(inode->i_mutex));
@@ -428,7 +440,7 @@ resizefs_out:
 #ifdef CONFIG_COMPAT
 long ext4_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
-	
+	/* These are just misnamed, they actually get/put from/to user an int */
 	switch (cmd) {
 	case EXT4_IOC32_GETFLAGS:
 		cmd = EXT4_IOC_GETFLAGS;
