@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -9,16 +9,15 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+#ifndef _DAL_AXI_H
+#define _DAL_AXI_H
 
-#ifndef __MACH_JTAG_H
-#define __MACH_JTAG_H
+#include <mach/dal.h>
 
-#if defined(CONFIG_MSM_JTAG) || defined(CONFIG_MSM_JTAG_MM)
-extern void msm_jtag_save_state(void);
-extern void msm_jtag_restore_state(void);
-#else
-static inline void msm_jtag_save_state(void) {}
-static inline void msm_jtag_restore_state(void) {}
-#endif
-
-#endif
+int set_grp2d_async(void);
+int set_grp3d_async(void);
+int set_grp_xbar_async(void);
+int axi_allocate(int mode);
+int axi_free(int mode);
+#define AXI_FLOW_VIEWFINDER_HI	243
+#endif  /* _DAL_AXI_H */

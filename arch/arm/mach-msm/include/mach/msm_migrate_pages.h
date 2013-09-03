@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -10,15 +10,8 @@
  * GNU General Public License for more details.
  */
 
-#ifndef __MACH_JTAG_H
-#define __MACH_JTAG_H
+#ifndef _MACH_MSM_MIGRATE_PAGES_H_
+#define _MACH_MSM_MIGRATE_PAGES_H_
 
-#if defined(CONFIG_MSM_JTAG) || defined(CONFIG_MSM_JTAG_MM)
-extern void msm_jtag_save_state(void);
-extern void msm_jtag_restore_state(void);
-#else
-static inline void msm_jtag_save_state(void) {}
-static inline void msm_jtag_restore_state(void) {}
-#endif
-
+unsigned long get_msm_migrate_pages_status(void);
 #endif
