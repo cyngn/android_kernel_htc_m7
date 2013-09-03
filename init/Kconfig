@@ -608,14 +608,6 @@ config CGROUP_FREEZER
 	  Provides a way to freeze and unfreeze all tasks in a
 	  cgroup.
 
-config CGROUP_TIMER_SLACK
-	bool "Timer slack cgroup controller"
-	help
-	  Provides a way to set minimal timer slack value for tasks in
-	  a cgroup.
-	  It's useful in mobile devices where certain background apps
-	  are attached to a cgroup and combined wakeups are desired.
-
 config CGROUP_DEVICE
 	bool "Device controller for cgroups"
 	help
@@ -1044,36 +1036,6 @@ config PRINTK
 	  and makes the kernel more or less silent. As this makes it
 	  very difficult to diagnose system problems, saying N here is
 	  strongly discouraged.
-
-config PRINTK_CPU_ID
-	default n
-	bool "Enable support for Print working core no. in dmesg" if EXPERT
-	help
-	  Print working core no. in dmesg
-
-config PRINTK_PID
-	default n
-	bool "Enable support for Print working core no. in dmesg" if EXPERT
-	help
-	  Print working core no. in dmesg
-
-config TRACING_SPINLOCK
-       default n
-       bool "Enable support footprint for irq status(enable/disable)" if EXPERT
-       help
-               support footprint for irq status(enable/disable)
-
-config TRACING_WORKQUEUE_HISTORY
-       default n
-       bool "Enable support footprint for workqueue history" if EXPERT
-       help
-               support footprint for workqueue history
-
-config TRACING_IRQ_PWR
-       default n
-       bool "Support tracing pwr key irq status(enable/disable)"
-       help
-	           Support tracing pwr key irq status(enable/disable)
 
 config BUG
 	bool "BUG() support" if EXPERT
