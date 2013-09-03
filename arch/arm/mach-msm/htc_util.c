@@ -303,7 +303,7 @@ void htc_pm_monitor_work(struct work_struct *work)
 	printk("[K] [PM] hTC PM Statistic start (%02d-%02d %02d:%02d:%02d) \n",
 		tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
 
-	htc_show_interrupts();
+	//htc_show_interrupts();
 	//htc_xo_block_clks_count_show();
 	//htc_xo_block_clks_count_clear();
 	msm_xo_print_voters();
@@ -343,7 +343,7 @@ void htc_kernel_top_accumulation_monitor_work(struct work_struct *work)
 			tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
 
 	if (!pm_monitor_enabled) {
-		htc_show_interrupts();
+		//htc_show_interrupts();
 		htc_print_active_wake_locks(WAKE_LOCK_SUSPEND);
 	}
 
