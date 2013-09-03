@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2009, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2008-2009, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -8,6 +8,10 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
+ */
+/*
+ * SMD NMEA Driver -- Provides GPS NMEA device to SMD port interface.
  *
  */
 
@@ -99,9 +103,9 @@ static ssize_t nmea_read(struct file *fp, char __user *buf,
 	r = wait_event_interruptible(nmea_wait_queue,
 				nmea_devp->bytes_read);
 	if (r < 0) {
-		
+		/* qualify error message */
 		if (r != -ERESTARTSYS) {
-			
+			/* we get this anytime a signal comes in */
 			printk(KERN_ERR "ERROR:%s:%i:%s: "
 				"wait_event_interruptible ret %i\n",
 				__FILE__,
