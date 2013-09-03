@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -60,7 +60,7 @@
 #define RIVA_PLL_N_VAL			(MSM_CLK_CTL_BASE + 0x31Ac)
 #define RIVA_PLL_CONFIG			(MSM_CLK_CTL_BASE + 0x31B4)
 #define RIVA_PLL_STATUS			(MSM_CLK_CTL_BASE + 0x31B8)
-#define RIVA_RESET			    (MSM_CLK_CTL_BASE + 0x35E0)
+#define RIVA_RESET			(MSM_CLK_CTL_BASE + 0x35E0)
 
 #define RIVA_PMU_ROOT_CLK_SEL		0xC8
 #define RIVA_PMU_ROOT_CLK_SEL_3		BIT(2)
@@ -76,41 +76,6 @@
 #define RIVA_PMU_CLK_ROOT3_SRC1_SEL		0xE000
 #define RIVA_PMU_CLK_ROOT3_SRC1_SEL_RIVA	(1 << 13)
 
-#define CLOCK_PLL_WARMUP_TIME_US         60
-#define LPASS_CSR_BASE                   0x28000000
-#define LCC_REG_BASE                     (LPASS_CSR_BASE      + 0x00000000)
-#define HWIO_RIVA_XO_SRC_CLK_CTL_ADDR    (MSM_CLK_CTL_BASE + 0x3880)
-#define HWIO_PLL_LOCK_DET_STATUS_ADDR    (MSM_CLK_CTL_BASE + 0x00003420)
-#define HWIO_RIVA_PLL_MODE_ADDR          (MSM_CLK_CTL_BASE + 0x000031a0)
-#define HWIO_LCC_PLL0_STATUS_ADDR        (LCC_REG_BASE      + 0x00000018)
-#define HWIO_LCC_PLL0_STATUS_PLL_ACTIVE_FLAG_BMSK    0x10000
-#define HWIO_PLL5_STATUS_ADDR            (MSM_CLK_CTL_BASE + 0x000030f8)
-#define HWIO_PLL5_STATUS_PLL_ACTIVE_FLAG_BMSK    0x10000
-#define HWIO_RIVA_PLL_STATUS_ADDR        (MSM_CLK_CTL_BASE + 0x000031b8)
-
-#define __outpdw(port, val) (*((volatile u32 *) (port)) = ((u32) (val)))
-#define out_dword(addr, val)        __outpdw(addr,val)
-#define out_dword_masked_ns(io, mask, val, current_reg_content) \
-  out_dword( io, ((current_reg_content & (u32)(~(mask))) | \
-                 ((u32)((val) & (mask)))) )
-#define __inpdw(port)       (*((volatile u32 *) (port)))
-#define in_dword_masked(addr, mask) (__inpdw(addr) & (mask))
-#define HWIO_RIVA_RESET_IN          \
-        in_dword_masked(RIVA_RESET, 0xffffffff)
-#define HWIO_RIVA_XO_SRC_CLK_CTL_IN          \
-			in_dword_masked(HWIO_RIVA_XO_SRC_CLK_CTL_ADDR, 0xffffffff)
-#define HWIO_RIVA_PLL_MODE_IN          \
-        in_dword_masked(HWIO_RIVA_PLL_MODE_ADDR, 0xffffffff)
-#define HWIO_RIVA_RESET_OUTM(m,v) \
-			out_dword_masked_ns(RIVA_RESET,m,v,HWIO_RIVA_RESET_IN)
-#define HWIO_RIVA_XO_SRC_CLK_CTL_OUTM(m,v) \
-        out_dword_masked_ns(HWIO_RIVA_XO_SRC_CLK_CTL_ADDR,m,v,HWIO_RIVA_XO_SRC_CLK_CTL_IN)
-#define HWIO_RIVA_PLL_MODE_OUTM(m,v) \
-        out_dword_masked_ns(HWIO_RIVA_PLL_MODE_ADDR,m,v,HWIO_RIVA_PLL_MODE_IN)
-
-#define TRUE 1
-#define FALSE 0
-
 struct riva_data {
 	void __iomem *base;
 	unsigned long start_addr;
@@ -118,55 +83,6 @@ struct riva_data {
 	struct regulator *pll_supply;
 	struct pil_device *pil;
 };
-
-enum
-{
-  CLOCK_SOURCE_XO,    
-  CLOCK_SOURCE_WCNXO, 
-  CLOCK_SOURCE_PLL4,  
-  CLOCK_SOURCE_PLL5,  
-  CLOCK_SOURCE_PLL13  
-};
-
-#ifdef CONFIG_QUALCOMM_WLAN_PXO
-static bool Clock_WaitForPLLActive (u32 nPLL)
-{
-  u32 nLoops = 100;
-  u32 nRegAddr, nRegMask;
-
-  switch(nPLL)
-  {
-    case CLOCK_SOURCE_PLL4:
-      nRegAddr = HWIO_LCC_PLL0_STATUS_ADDR;
-      nRegMask = HWIO_LCC_PLL0_STATUS_PLL_ACTIVE_FLAG_BMSK;
-      break;
-    case CLOCK_SOURCE_PLL5:
-      nRegAddr = (u32)HWIO_PLL5_STATUS_ADDR;
-      nRegMask = HWIO_PLL5_STATUS_PLL_ACTIVE_FLAG_BMSK;
-      break;
-    case CLOCK_SOURCE_PLL13:
-      nRegAddr = (u32)HWIO_RIVA_PLL_STATUS_ADDR;
-      nRegMask = 0x1;
-      break;
-    default:
-      return FALSE;
-  }
-
-  while(nLoops > 0)
-  {
-    if(__inpdw(nRegAddr) & nRegMask)
-    {
-      return TRUE;
-    }
-
-    udelay(1);
-    nLoops--;
-  }
-
-  return FALSE;
-
-} 
-#endif
 
 static bool cxo_is_needed(struct riva_data *drv)
 {
@@ -220,16 +136,13 @@ static int pil_riva_reset(struct pil_desc *pil)
 	void __iomem *base = drv->base;
 	unsigned long start_addr = drv->start_addr;
 	bool use_cxo = cxo_is_needed(drv);
-#ifdef CONFIG_QUALCOMM_WLAN_PXO
-	u32 nLoopCount = 5;
-#endif
 
-	
+	/* Enable A2XB bridge */
 	reg = readl_relaxed(base + RIVA_PMU_A2XB_CFG);
 	reg |= RIVA_PMU_A2XB_CFG_EN;
 	writel_relaxed(reg, base + RIVA_PMU_A2XB_CFG);
 
-	
+	/* Program PLL 13 to 960 MHz */
 	reg = readl_relaxed(RIVA_PLL_MODE);
 	reg &= ~(PLL_MODE_BYPASSNL | PLL_MODE_OUTCTRL | PLL_MODE_RESET_N);
 	writel_relaxed(reg, RIVA_PLL_MODE);
@@ -247,10 +160,14 @@ static int pil_riva_reset(struct pil_desc *pil)
 	reg |= use_cxo ? PLL_MODE_REF_XO_SEL_CXO : PLL_MODE_REF_XO_SEL_RF;
 	writel_relaxed(reg, RIVA_PLL_MODE);
 
-	
+	/* Enable PLL 13 */
 	reg |= PLL_MODE_BYPASSNL;
 	writel_relaxed(reg, RIVA_PLL_MODE);
 
+	/*
+	 * H/W requires a 5us delay between disabling the bypass and
+	 * de-asserting the reset. Delay 10us just to be safe.
+	 */
 	mb();
 	usleep_range(10, 20);
 
@@ -259,37 +176,11 @@ static int pil_riva_reset(struct pil_desc *pil)
 	reg |= PLL_MODE_OUTCTRL;
 	writel_relaxed(reg, RIVA_PLL_MODE);
 
-	
+	/* Wait for PLL to settle */
 	mb();
 	usleep_range(50, 100);
 
-	
-#ifdef CONFIG_QUALCOMM_WLAN_PXO
-	printk("[WLAN][SSR] Wait for PLL warm-up\n");
-	while(nLoopCount > 0) 
-	{
-		udelay(CLOCK_PLL_WARMUP_TIME_US);
-		if(in_dword_masked(HWIO_PLL_LOCK_DET_STATUS_ADDR, 0xffffffff) & (1 << 13))
-		{break;}
-		nLoopCount--;
-	}
-
-	if(nLoopCount == 0)
-	{
-		printk("[WLAN][SSR] PLL lock detection failed!\n");
-		return -1;
-	}
-	printk("[WLAN][SSR] Check PLL lock detection passed\n");
-
-	HWIO_RIVA_PLL_MODE_OUTM(0x1, (u32)(1) << (0x0)); 
-
-	if (Clock_WaitForPLLActive(CLOCK_SOURCE_PLL13) == FALSE)
-	{return -1;}
-	printk("[WLAN][SSR] Wait for PLL Active ...OK!\n");
-#endif
-	
-
-	
+	/* Configure cCPU for 240 MHz */
 	sel = readl_relaxed(base + RIVA_PMU_ROOT_CLK_SEL);
 	reg = readl_relaxed(base + RIVA_PMU_CLK_ROOT3);
 	if (sel & RIVA_PMU_ROOT_CLK_SEL_3) {
@@ -310,35 +201,25 @@ static int pil_riva_reset(struct pil_desc *pil)
 	reg ^= RIVA_PMU_ROOT_CLK_SEL_3;
 	writel_relaxed(reg, base + RIVA_PMU_ROOT_CLK_SEL);
 
-	
+	/* Use the high vector table */
 	reg = readl_relaxed(base + RIVA_PMU_CCPU_CTL);
 	reg |= RIVA_PMU_CCPU_CTL_HIGH_IVT | RIVA_PMU_CCPU_CTL_REMAP_EN;
 	writel_relaxed(reg, base + RIVA_PMU_CCPU_CTL);
 
-	
+	/* Set base memory address */
 	writel_relaxed(start_addr >> 16, base + RIVA_PMU_CCPU_BOOT_REMAP_ADDR);
 
-	
+	/* Clear warmboot bit indicating this is a cold boot */
 	reg = readl_relaxed(base + RIVA_PMU_CFG);
 	reg &= ~(RIVA_PMU_CFG_WARM_BOOT);
 	writel_relaxed(reg, base + RIVA_PMU_CFG);
 
-	
+	/* Enable the cCPU clock */
 	reg = readl_relaxed(base + RIVA_PMU_OVRD_VAL);
 	reg |= RIVA_PMU_OVRD_VAL_CCPU_CLK;
 	writel_relaxed(reg, base + RIVA_PMU_OVRD_VAL);
 
-	
-#ifdef CONFIG_QUALCOMM_WLAN_PXO
-	printk("[WLAN][SSR] Use PXO for RIVA\n");
-
-	HWIO_RIVA_RESET_OUTM((0x2),(u32)(1) << (0x1)); 
-	HWIO_RIVA_XO_SRC_CLK_CTL_OUTM((0x00000004), (u32)(1) << (0x2)); 
-	HWIO_RIVA_RESET_OUTM((0x2),(u32)(0) << (0x1)); 
-#endif
-	
-
-	
+	/* Take cCPU out of reset */
 	reg |= RIVA_PMU_OVRD_VAL_CCPU_RESET;
 	writel_relaxed(reg, base + RIVA_PMU_OVRD_VAL);
 
@@ -347,24 +228,12 @@ static int pil_riva_reset(struct pil_desc *pil)
 
 static int pil_riva_shutdown(struct pil_desc *pil)
 {
-	struct riva_data *drv = dev_get_drvdata(pil->dev);
-	u32 reg;
-
-	
-	reg = readl_relaxed(drv->base + RIVA_PMU_OVRD_VAL);
-	reg &= ~(RIVA_PMU_OVRD_VAL_CCPU_RESET | RIVA_PMU_OVRD_VAL_CCPU_CLK);
-	writel_relaxed(reg, drv->base + RIVA_PMU_OVRD_VAL);
-	reg = readl_relaxed(drv->base + RIVA_PMU_OVRD_EN);
-	reg |= RIVA_PMU_OVRD_EN_CCPU_RESET | RIVA_PMU_OVRD_EN_CCPU_CLK;
-	writel_relaxed(reg, drv->base + RIVA_PMU_OVRD_EN);
-	mb();
-
-	
+	/* Assert reset to Riva */
 	writel_relaxed(1, RIVA_RESET);
 	mb();
 	usleep_range(1000, 2000);
 
-	
+	/* Deassert reset to Riva */
 	writel_relaxed(0, RIVA_RESET);
 	mb();
 
@@ -382,17 +251,17 @@ static struct pil_reset_ops pil_riva_ops = {
 static int pil_riva_init_image_trusted(struct pil_desc *pil,
 		const u8 *metadata, size_t size)
 {
-	return pas_init_image(PAS_RIVA, metadata, size);
+	return pas_init_image(PAS_WCNSS, metadata, size);
 }
 
 static int pil_riva_reset_trusted(struct pil_desc *pil)
 {
-	return pas_auth_and_reset(PAS_RIVA);
+	return pas_auth_and_reset(PAS_WCNSS);
 }
 
 static int pil_riva_shutdown_trusted(struct pil_desc *pil)
 {
-	return pas_shutdown(PAS_RIVA);
+	return pas_shutdown(PAS_WCNSS);
 }
 
 static struct pil_reset_ops pil_riva_ops_trusted = {
@@ -453,7 +322,7 @@ static int __devinit pil_riva_probe(struct platform_device *pdev)
 	desc->owner = THIS_MODULE;
 	desc->proxy_timeout = 10000;
 
-	if (pas_supported(PAS_RIVA) > 0) {
+	if (pas_supported(PAS_WCNSS) > 0) {
 		desc->ops = &pil_riva_ops_trusted;
 		dev_info(&pdev->dev, "using secure boot\n");
 	} else {

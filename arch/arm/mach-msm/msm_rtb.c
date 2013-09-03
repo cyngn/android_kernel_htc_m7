@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -16,22 +16,34 @@
 #include <linux/kernel.h>
 #include <linux/memory_alloc.h>
 #include <linux/module.h>
+#include <linux/mod_devicetable.h>
 #include <linux/platform_device.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/atomic.h>
+#include <linux/of.h>
 #include <asm/io.h>
 #include <asm-generic/sizes.h>
 #include <mach/memory.h>
 #include <mach/msm_rtb.h>
 #include <mach/system.h>
-#include <mach/msm_iomap.h>
 
 #define SENTINEL_BYTE_1 0xFF
 #define SENTINEL_BYTE_2 0xAA
 #define SENTINEL_BYTE_3 0xFF
 
+#define RTB_COMPAT_STR	"qcom,msm-rtb"
+
+/* Write
+ * 1) 3 bytes sentinel
+ * 2) 1 bytes of log type
+ * 3) 4 bytes of where the caller came from
+ * 4) 4 bytes index
+ * 4) 4 bytes extra data from the caller
+ *
+ * Total = 16 bytes.
+ */
 struct msm_rtb_layout {
 	unsigned char sentinel[3];
 	unsigned char log_type;
@@ -59,31 +71,17 @@ static atomic_t msm_rtb_idx;
 #endif
 
 struct msm_rtb_state msm_rtb = {
-	.filter = (1 << LOGK_READL)|(1 << LOGK_WRITEL)|(1 << LOGK_LOGBUF)
-		|(1 << LOGK_HOTPLUG)|(1 << LOGK_CTXID)|(1 << LOGK_IRQ)|(1 << LOGK_DIE),
+	.filter = 1 << LOGK_READL | 1 << LOGK_WRITEL,
 	.enabled = 1,
 };
 
 module_param_named(filter, msm_rtb.filter, uint, 0644);
 module_param_named(enable, msm_rtb.enabled, int, 0644);
 
-int msm_rtb_enabled(void)
-{
-	return msm_rtb.enabled;
-}
-EXPORT_SYMBOL(msm_rtb_enabled);
-
-void msm_rtb_disable(void)
-{
-	msm_rtb.enabled = 0;
-	return;
-}
-EXPORT_SYMBOL(msm_rtb_disable);
-
 static int msm_rtb_panic_notifier(struct notifier_block *this,
 					unsigned long event, void *ptr)
 {
-	msm_rtb_disable();
+	msm_rtb.enabled = 0;
 	return NOTIFY_DONE;
 }
 
@@ -162,6 +160,10 @@ static int msm_rtb_get_idx(void)
 	int cpu, i, offset;
 	atomic_t *index;
 
+	/*
+	 * ideally we would use get_cpu but this is a close enough
+	 * approximation for our purposes.
+	 */
 	cpu = raw_smp_processor_id();
 
 	index = &per_cpu(msm_rtb_idx_cpu, cpu);
@@ -169,7 +171,7 @@ static int msm_rtb_get_idx(void)
 	i = atomic_add_return(msm_rtb.step_size, index);
 	i -= msm_rtb.step_size;
 
-	
+	/* Check if index has wrapped around */
 	offset = (i & (msm_rtb.nentries - 1)) -
 		 ((i - msm_rtb.step_size) & (msm_rtb.nentries - 1));
 	if (offset < 0) {
@@ -188,7 +190,7 @@ static int msm_rtb_get_idx(void)
 	i = atomic_inc_return(&msm_rtb_idx);
 	i--;
 
-	
+	/* Check if index has wrapped around */
 	offset = (i & (msm_rtb.nentries - 1)) -
 		 ((i - 1) & (msm_rtb.nentries - 1));
 	if (offset < 0) {
@@ -200,14 +202,6 @@ static int msm_rtb_get_idx(void)
 	return i;
 }
 #endif
-
-unsigned long get_current_timestamp(void)
-{
-	unsigned long long timestamp;
-	timestamp = sched_clock();
-	do_div(timestamp, NSEC_PER_MSEC);
-	return ((unsigned long)timestamp);
-}
 
 int uncached_logk_pc(enum logk_event_type log_type, void *caller,
 				void *data)
@@ -231,37 +225,38 @@ noinline int uncached_logk(enum logk_event_type log_type, void *data)
 }
 EXPORT_SYMBOL(uncached_logk);
 
-#define RTB_MAGIC		0x5254424D 
-#define RTB_FOOT_PRINT_MAGIC	(RTB_FOOT_PRINT_BASE + 0x0)
-#define RTB_FOOT_PRINT_MSM_RTB	(RTB_FOOT_PRINT_BASE + 0x4)
-#define RTB_FOOT_PRINT_CPU_IDX	(RTB_FOOT_PRINT_BASE + 0x8)
-
-static void msm_rtb_save_footprint(void)
-{
-	unsigned int cpu;
-
-	*(unsigned *)RTB_FOOT_PRINT_MAGIC = (unsigned)RTB_MAGIC;
-	*(unsigned *)RTB_FOOT_PRINT_MSM_RTB = (unsigned)virt_to_phys(&msm_rtb);
-	for (cpu = 0; cpu < msm_rtb.step_size; cpu++)
-		*(unsigned *)(RTB_FOOT_PRINT_CPU_IDX + (cpu * 0x4)) = (unsigned)virt_to_phys(&per_cpu(msm_rtb_idx_cpu, cpu));
-}
-
 int msm_rtb_probe(struct platform_device *pdev)
 {
 	struct msm_rtb_platform_data *d = pdev->dev.platform_data;
 #if defined(CONFIG_MSM_RTB_SEPARATE_CPUS)
 	unsigned int cpu;
 #endif
+	int ret;
 
-	msm_rtb.size = d->size;
+	if (!pdev->dev.of_node) {
+		msm_rtb.size = d->size;
+	} else {
+		int size;
+
+		ret = of_property_read_u32((&pdev->dev)->of_node,
+					"qcom,memory-reservation-size",
+					&size);
+
+		if (ret < 0)
+			return ret;
+
+		msm_rtb.size = size;
+	}
 
 	if (msm_rtb.size <= 0 || msm_rtb.size > SZ_1M)
 		return -EINVAL;
 
-	if(d->buffer_start_addr == 0)
-		msm_rtb.phys = allocate_contiguous_ebi_nomap(msm_rtb.size, SZ_4K);
-	else
-		msm_rtb.phys = d->buffer_start_addr; 
+	/*
+	 * The ioremap call is made separately to store the physical
+	 * address of the buffer. This is necessary for cases where
+	 * the only way to access the buffer is a physical address.
+	 */
+	msm_rtb.phys = allocate_contiguous_ebi_nomap(msm_rtb.size, SZ_4K);
 
 	if (!msm_rtb.phys)
 		return -ENOMEM;
@@ -275,7 +270,7 @@ int msm_rtb_probe(struct platform_device *pdev)
 
 	msm_rtb.nentries = msm_rtb.size / sizeof(struct msm_rtb_layout);
 
-	
+	/* Round this down to a power of 2 */
 	msm_rtb.nentries = __rounddown_pow_of_two(msm_rtb.nentries);
 
 	memset(msm_rtb.rtb, 0, msm_rtb.size);
@@ -295,15 +290,20 @@ int msm_rtb_probe(struct platform_device *pdev)
 	atomic_notifier_chain_register(&panic_notifier_list,
 						&msm_rtb_panic_blk);
 	msm_rtb.initialized = 1;
-	msm_rtb_save_footprint();
-
 	return 0;
 }
+
+static struct of_device_id msm_match_table[] = {
+	{.compatible = RTB_COMPAT_STR},
+	{},
+};
+EXPORT_COMPAT(RTB_COMPAT_STR);
 
 static struct platform_driver msm_rtb_driver = {
 	.driver         = {
 		.name = "msm_rtb",
-		.owner = THIS_MODULE
+		.owner = THIS_MODULE,
+		.of_match_table = msm_match_table
 	},
 };
 

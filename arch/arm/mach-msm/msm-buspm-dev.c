@@ -1,4 +1,4 @@
-/* Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -10,6 +10,7 @@
  * GNU General Public License for more details.
  */
 
+/* #define DEBUG */
 
 #include <linux/module.h>
 #include <linux/fs.h>
@@ -25,12 +26,25 @@
 
 #define MSM_BUSPM_DRV_NAME "msm-buspm-dev"
 
+/*
+ * Allocate kernel buffer.
+ * Currently limited to one buffer per file descriptor.  If alloc() is
+ * called twice for the same descriptor, the original buffer is freed.
+ * There is also no locking protection so the same descriptor can not be shared.
+ */
 
 static inline void *msm_buspm_dev_get_vaddr(struct file *filp)
 {
 	struct msm_buspm_map_dev *dev = filp->private_data;
 
 	return (dev) ? dev->vaddr : NULL;
+}
+
+static inline unsigned int msm_buspm_dev_get_buflen(struct file *filp)
+{
+	struct msm_buspm_map_dev *dev = filp->private_data;
+
+	return dev ? dev->buflen : 0;
 }
 
 static inline unsigned long msm_buspm_dev_get_paddr(struct file *filp)
@@ -76,11 +90,11 @@ msm_buspm_dev_alloc(struct file *filp, struct buspm_alloc_params data)
 	void *vaddr;
 	struct msm_buspm_map_dev *dev = filp->private_data;
 
-	
+	/* If buffer already allocated, then free it */
 	if (dev->vaddr)
 		msm_buspm_dev_free(filp);
 
-	
+	/* Allocate uncached memory */
 	vaddr = allocate_contiguous_ebi(data.size, PAGE_SIZE, 0);
 	paddr = (vaddr) ? memory_pool_node_paddr(vaddr) : 0L;
 
@@ -107,6 +121,7 @@ msm_buspm_dev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	unsigned long paddr;
 	int retval = 0;
 	void *buf = msm_buspm_dev_get_vaddr(filp);
+	unsigned int buflen = msm_buspm_dev_get_buflen(filp);
 	unsigned char *dbgbuf = buf;
 
 	switch (cmd) {
@@ -149,7 +164,7 @@ msm_buspm_dev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			break;
 		}
 
-		if ((xfer.size <= sizeof(buf)) &&
+		if ((xfer.size <= buflen) &&
 			(copy_to_user((void __user *)xfer.data, buf,
 					xfer.size))) {
 			retval = -EFAULT;
@@ -170,7 +185,7 @@ msm_buspm_dev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			break;
 		}
 
-		if ((sizeof(buf) <= xfer.size) &&
+		if ((buflen <= xfer.size) &&
 			(copy_from_user(buf, (void __user *)xfer.data,
 			xfer.size))) {
 			retval = -EFAULT;
@@ -202,7 +217,7 @@ static int msm_buspm_dev_mmap(struct file *filp, struct vm_area_struct *vma)
 {
 	pr_debug("vma = 0x%p\n", vma);
 
-	
+	/* Mappings are uncached */
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 	if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
 		vma->vm_end - vma->vm_start, vma->vm_page_prot))

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -21,7 +21,6 @@
 #include <mach/socinfo.h>
 #include <mach/msm_bus.h>
 #include <mach/msm_bus_board.h>
-#include <mach/msm_watchdog.h>
 #include "scm-pas.h"
 
 #define PAS_INIT_IMAGE_CMD	1
@@ -37,7 +36,7 @@ int pas_init_image(enum pas_id id, const u8 *metadata, size_t size)
 		u32	image_addr;
 	} request;
 	u32 scm_ret = 0;
-	
+	/* Make memory physically contiguous */
 	void *mdata_buf = kmemdup(metadata, size, GFP_KERNEL);
 
 	if (!mdata_buf)
@@ -46,12 +45,8 @@ int pas_init_image(enum pas_id id, const u8 *metadata, size_t size)
 	request.proc = id;
 	request.image_addr = virt_to_phys(mdata_buf);
 
-	pr_info("init image, id:%d\n", id);
-	pet_watchdog();
-	set_dog_pet_footprint();
 	ret = scm_call(SCM_SVC_PIL, PAS_INIT_IMAGE_CMD, &request,
 			sizeof(request), &scm_ret, sizeof(scm_ret));
-	pr_info("init image, id:%d ret:%d\n", id, ret);
 	kfree(mdata_buf);
 
 	if (ret)
@@ -99,7 +94,7 @@ static int scm_pas_enable_bw(void)
 {
 	int ret = 0;
 
-	if (!scm_perf_client || !scm_bus_clk)
+	if (!scm_perf_client)
 		return -EINVAL;
 
 	mutex_lock(&scm_pas_bw_mutex);
@@ -107,7 +102,7 @@ static int scm_pas_enable_bw(void)
 		ret = msm_bus_scale_client_update_request(scm_perf_client, 1);
 		if (ret) {
 			pr_err("bandwidth request failed (%d)\n", ret);
-		} else {
+		} else if (scm_bus_clk) {
 			ret = clk_prepare_enable(scm_bus_clk);
 			if (ret)
 				pr_err("clock enable failed\n");
@@ -126,14 +121,15 @@ static void scm_pas_disable_bw(void)
 	mutex_lock(&scm_pas_bw_mutex);
 	if (scm_pas_bw_count-- == 1) {
 		msm_bus_scale_client_update_request(scm_perf_client, 0);
-		clk_disable_unprepare(scm_bus_clk);
+		if (scm_bus_clk)
+			clk_disable_unprepare(scm_bus_clk);
 	}
 	mutex_unlock(&scm_pas_bw_mutex);
 }
 
 int scm_pas_enable_dx_bw(void)
 {
-    return scm_pas_enable_bw();
+	return scm_pas_enable_bw();
 }
 EXPORT_SYMBOL(scm_pas_enable_dx_bw);
 
@@ -149,12 +145,8 @@ int pas_auth_and_reset(enum pas_id id)
 	u32 proc = id, scm_ret = 0;
 
 	bus_ret = scm_pas_enable_bw();
-	pr_info("auth and reset, id:%d\n", id);
-	pet_watchdog();
-	set_dog_pet_footprint();
 	ret = scm_call(SCM_SVC_PIL, PAS_AUTH_AND_RESET_CMD, &proc,
 			sizeof(proc), &scm_ret, sizeof(scm_ret));
-	pr_info("auth and reset, id:%d ret:%d\n", id, ret);
 	if (ret)
 		scm_ret = ret;
 	if (!bus_ret)
@@ -190,6 +182,10 @@ int pas_supported(enum pas_id id)
 	if (!secure_pil)
 		return 0;
 
+	/*
+	 * 8660 SCM doesn't support querying secure PIL support so just return
+	 * true if not overridden on the command line.
+	 */
 	if (cpu_is_msm8x60())
 		return 1;
 
@@ -207,16 +203,23 @@ EXPORT_SYMBOL(pas_supported);
 
 static int __init scm_pas_init(void)
 {
+	if (cpu_is_msm8974()) {
+		scm_pas_bw_tbl[0].vectors[0].src = MSM_BUS_MASTER_CRYPTO_CORE0;
+		scm_pas_bw_tbl[1].vectors[0].src = MSM_BUS_MASTER_CRYPTO_CORE0;
+	} else {
+		scm_bus_clk = clk_get_sys("scm", "bus_clk");
+		if (!IS_ERR(scm_bus_clk)) {
+			clk_set_rate(scm_bus_clk, 64000000);
+		} else {
+			scm_bus_clk = NULL;
+			pr_warn("unable to get bus clock\n");
+		}
+	}
+
 	scm_perf_client = msm_bus_scale_register_client(&scm_pas_bus_pdata);
 	if (!scm_perf_client)
 		pr_warn("unable to register bus client\n");
-	scm_bus_clk = clk_get_sys("scm", "bus_clk");
-	if (!IS_ERR(scm_bus_clk)) {
-		clk_set_rate(scm_bus_clk, 64000000);
-	} else {
-		scm_bus_clk = NULL;
-		pr_warn("unable to get bus clock\n");
-	}
+
 	return 0;
 }
 module_init(scm_pas_init);

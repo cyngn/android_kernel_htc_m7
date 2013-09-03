@@ -537,8 +537,8 @@ static void mdm_fatal_fn(struct work_struct *work)
 	
 	pr_info("### Show Blocked State in ###\n");
 	show_state_filter(TASK_UNINTERRUPTIBLE);
-	if (get_restart_level() == RESET_SOC)
-		msm_rtb_disable();
+	//if (get_restart_level() == RESET_SOC)
+	//	msm_rtb_disable();
 
 	if (get_restart_level() == RESET_SOC)
 		set_mdm2ap_errfatal_restart_flag(1);
@@ -597,7 +597,7 @@ static void mdm_status_fn(struct work_struct *work)
 		pr_info("### Show Blocked State in ###\n");
 		show_state_filter(TASK_UNINTERRUPTIBLE);
 		if (get_restart_level() == RESET_SOC)
-			msm_rtb_disable();
+	//		msm_rtb_disable();
 
 		if (get_restart_level() == RESET_SOC)
 			set_mdm2ap_errfatal_restart_flag(1);

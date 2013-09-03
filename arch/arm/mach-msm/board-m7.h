@@ -239,4 +239,5 @@ void m7_usb_uart_switch(int nvbus);
 void reset_dflipflop(void);
 #endif
 
+extern struct msm_rtb_platform_data apq8064_rtb_pdata;
 #endif

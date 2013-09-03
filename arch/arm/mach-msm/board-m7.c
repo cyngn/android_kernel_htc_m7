@@ -350,31 +350,6 @@ static struct memtype_reserve apq8064_reserve_table[] __initdata = {
 	},
 };
 
-#if defined(CONFIG_MSM_RTB)
-static struct msm_rtb_platform_data m7_rtb_pdata = {
-	.buffer_start_addr = MSM_RTB_PHYS,
-	.size = MSM_RTB_BUFFER_SIZE,
-};
-
-static int __init msm_rtb_set_buffer_size(char *p)
-{
-	int s;
-
-	s = memparse(p, NULL);
-	m7_rtb_pdata.size = ALIGN(s, SZ_4K);
-	return 0;
-}
-early_param("msm_rtb_size", msm_rtb_set_buffer_size);
-
-static struct platform_device m7_rtb_device = {
-	.name = "msm_rtb",
-	.id = -1,
-	.dev = {
-		.platform_data = &m7_rtb_pdata,
-	},
-};
-#endif
-
 #ifdef CONFIG_I2C
 #define MSM8064_GSBI2_QUP_I2C_BUS_ID 2
 #define MSM8064_GSBI3_QUP_I2C_BUS_ID 3
@@ -388,6 +363,15 @@ static struct i2c_board_info nmi625_i2c_info[] = {
 #endif
 
 #endif
+
+static void __init reserve_rtb_memory(void)
+{
+#if defined(CONFIG_MSM_RTB)
+	apq8064_reserve_table[MEMTYPE_EBI1].size += apq8064_rtb_pdata.size;
+	pr_info("mem_map: rtb reserved with size 0x%x in pool\n",
+			apq8064_rtb_pdata.size);
+#endif
+}
 
 static void __init size_pmem_devices(void)
 {
@@ -887,6 +871,7 @@ static void __init m7_calculate_reserve_sizes(void)
 	reserve_pmem_memory();
 	reserve_ion_memory();
 	reserve_mdp_memory();
+	reserve_rtb_memory();
 }
 
 static struct reserve_info m7_reserve_info __initdata = {
@@ -4568,7 +4553,7 @@ static struct platform_device *common_devices[] __initdata = {
 	&msm_pil_vidc,
 	&msm_gss,
 #ifdef CONFIG_MSM_RTB
-	&m7_rtb_device,
+	&apq8064_rtb_device,
 #endif
 
 #ifdef CONFIG_MSM_GEMINI

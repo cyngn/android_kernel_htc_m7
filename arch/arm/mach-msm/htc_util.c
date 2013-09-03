@@ -306,7 +306,7 @@ void htc_pm_monitor_work(struct work_struct *work)
 	//htc_show_interrupts();
 	//htc_xo_block_clks_count_show();
 	//htc_xo_block_clks_count_clear();
-	msm_xo_print_voters();
+	//msm_xo_print_voters();
 	htc_idle_stat_show(msm_htc_util_delay_time);
 	htc_idle_stat_clear();
 	htc_timer_stats_onoff('0');
