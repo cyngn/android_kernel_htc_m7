@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -18,16 +18,20 @@
 #include <mach/msm_smd.h>
 #include <mach/subsystem_notif.h>
 
+/**
+ * enum subsys_id - Destination subsystems for events.
+ */
 enum subsys_id {
-	
+	/* SMD subsystems */
 	SYSMON_SS_MODEM     = SMD_APPS_MODEM,
 	SYSMON_SS_LPASS     = SMD_APPS_QDSP,
 	SYSMON_SS_WCNSS     = SMD_APPS_WCNSS,
 	SYSMON_SS_DSPS      = SMD_APPS_DSPS,
 	SYSMON_SS_Q6FW      = SMD_APPS_Q6FW,
 
-	
+	/* Non-SMD subsystems */
 	SYSMON_SS_EXT_MODEM = SMD_NUM_TYPE,
+	SYSMON_SS_EXT_MODEM2,
 	SYSMON_NUM_SS
 };
 

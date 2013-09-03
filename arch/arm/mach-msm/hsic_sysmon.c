@@ -1,4 +1,4 @@
-/* Copyright (c) 2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -10,6 +10,7 @@
  * GNU General Public License for more details.
  */
 
+/* add additional information to our printk's */
 #define pr_fmt(fmt) "%s: " fmt "\n", __func__
 
 #include <linux/kernel.h>
@@ -25,34 +26,6 @@
 
 #include "hsic_sysmon.h"
 #include "sysmon.h"
-
-#if defined(pr_warn)
-#undef pr_warn
-#endif
-#define pr_warn(x...) do {				\
-			printk(KERN_WARN "[HSIC][SYSMON] "x);		\
-	} while (0)
-
-#if defined(pr_debug)
-#undef pr_debug
-#endif
-#define pr_debug(x...) do {				\
-			printk(KERN_DEBUG "[HSIC][SYSMON] "x);		\
-	} while (0)
-
-#if defined(pr_info)
-#undef pr_info
-#endif
-#define pr_info(x...) do {				\
-			printk(KERN_INFO "[HSIC][SYSMON] "x);		\
-	} while (0)
-
-#if defined(pr_err)
-#undef pr_err
-#endif
-#define pr_err(x...) do {				\
-			printk(KERN_ERR "[HSIC][SYSMON] "x);		\
-	} while (0)
 
 #define DRIVER_DESC	"HSIC System monitor driver"
 
@@ -72,7 +45,7 @@ struct hsic_sysmon {
 	struct platform_device	pdev;
 	int			id;
 
-	
+	/* debugging counters */
 	atomic_t		dbg_bytecnt[NUM_OPS];
 	atomic_t		dbg_pending[NUM_OPS];
 };
@@ -87,6 +60,15 @@ static void hsic_sysmon_delete(struct kref *kref)
 	kfree(hs);
 }
 
+/**
+ * hsic_sysmon_open() - Opens the system monitor bridge.
+ * @id: the HSIC system monitor device to open
+ *
+ * This should only be called after the platform_device "sys_mon" with id
+ * SYSMON_SS_EXT_MODEM has been added. The simplest way to do that is to
+ * register a platform_driver and its probe will be called when the HSIC
+ * device is ready.
+ */
 int hsic_sysmon_open(enum hsic_sysmon_device_id id)
 {
 	struct hsic_sysmon	*hs;
@@ -108,6 +90,10 @@ int hsic_sysmon_open(enum hsic_sysmon_device_id id)
 }
 EXPORT_SYMBOL(hsic_sysmon_open);
 
+/**
+ * hsic_sysmon_close() - Closes the system monitor bridge.
+ * @id: the HSIC system monitor device to close
+ */
 void hsic_sysmon_close(enum hsic_sysmon_device_id id)
 {
 	struct hsic_sysmon	*hs;
@@ -122,6 +108,9 @@ void hsic_sysmon_close(enum hsic_sysmon_device_id id)
 }
 EXPORT_SYMBOL(hsic_sysmon_close);
 
+/**
+ * hsic_sysmon_readwrite() - Common function to send read/write over HSIC
+ */
 static int hsic_sysmon_readwrite(enum hsic_sysmon_device_id id, void *data,
 				 size_t len, size_t *actual_len, int timeout,
 				 enum hsic_sysmon_op op)
@@ -178,6 +167,25 @@ static int hsic_sysmon_readwrite(enum hsic_sysmon_device_id id, void *data,
 	return ret;
 }
 
+/**
+ * hsic_sysmon_read() - Read data from the HSIC sysmon interface.
+ * @id: the HSIC system monitor device to open
+ * @data: pointer to caller-allocated buffer to fill in
+ * @len: length in bytes of the buffer
+ * @actual_len: pointer to a location to put the actual length read
+ *	in bytes
+ * @timeout: time in msecs to wait for the message to complete before
+ *	timing out (if 0 the wait is forever)
+ *
+ * Context: !in_interrupt ()
+ *
+ * Synchronously reads data from the HSIC interface. The call will return
+ * after the read has completed, encountered an error, or timed out. Upon
+ * successful return actual_len will reflect the number of bytes read.
+ *
+ * If successful, it returns 0, otherwise a negative error number.  The number
+ * of actual bytes transferred will be stored in the actual_len paramater.
+ */
 int hsic_sysmon_read(enum hsic_sysmon_device_id id, char *data, size_t len,
 		     size_t *actual_len, int timeout)
 {
@@ -231,7 +239,7 @@ static ssize_t sysmon_debug_read_stats(struct file *file, char __user *ubuf,
 		if (!hs)
 			continue;
 
-		ret += scnprintf(buf, DEBUG_BUF_SIZE,
+		ret += scnprintf(buf + ret, DEBUG_BUF_SIZE - ret,
 				"---HSIC Sysmon #%d---\n"
 				"epin:%d, epout:%d\n"
 				"bytes to host: %d\n"
@@ -316,15 +324,6 @@ hsic_sysmon_probe(struct usb_interface *ifc, const struct usb_device_id *id)
 	struct usb_endpoint_descriptor	*ep_desc;
 	int				i;
 	int				ret = -ENOMEM;
-	__u8				ifc_num;
-
-	pr_debug("id:%lu", id->driver_info);
-
-	ifc_num = ifc->cur_altsetting->desc.bInterfaceNumber;
-
-	
-	if (ifc_num != id->driver_info)
-		return -ENODEV;
 
 	hs = kzalloc(sizeof(*hs), GFP_KERNEL);
 	if (!hs) {
@@ -359,12 +358,17 @@ hsic_sysmon_probe(struct usb_interface *ifc, const struct usb_device_id *id)
 		goto error;
 	}
 
-	hs->id = HSIC_SYSMON_DEV_EXT_MODEM;
-	hsic_sysmon_devices[HSIC_SYSMON_DEV_EXT_MODEM] = hs;
+	hs->id = HSIC_SYSMON_DEV_EXT_MODEM + id->driver_info;
+	if (hs->id >= NUM_HSIC_SYSMON_DEVS) {
+		pr_warn("invalid dev id(%d)", hs->id);
+		hs->id = 0;
+	}
+
+	hsic_sysmon_devices[hs->id] = hs;
 	usb_set_intfdata(ifc, hs);
 
 	hs->pdev.name = "sys_mon";
-	hs->pdev.id = SYSMON_SS_EXT_MODEM;
+	hs->pdev.id = SYSMON_SS_EXT_MODEM + hs->id;
 	hs->pdev.dev.release = hsic_sysmon_pdev_release;
 	platform_device_register(&hs->pdev);
 
@@ -398,16 +402,14 @@ static int hsic_sysmon_resume(struct usb_interface *ifc)
 	return 0;
 }
 
-static int hsic_sysmon_reset_resume(struct usb_interface *ifc)
-{
-	pr_info("%s\n", __func__);
-	return 0;
-}
-
+/* driver_info is the instance number when multiple devices are present */
 static const struct usb_device_id hsic_sysmon_ids[] = {
-	{ USB_DEVICE(0x5c6, 0x9048), .driver_info = 1, },
-	{ USB_DEVICE(0x5c6, 0x904C), .driver_info = 1, },
-	{} 
+	{ USB_DEVICE_INTERFACE_NUMBER(0x5c6, 0x9048, 1), .driver_info = 0, },
+	{ USB_DEVICE_INTERFACE_NUMBER(0x5c6, 0x904C, 1), .driver_info = 0, },
+	{ USB_DEVICE_INTERFACE_NUMBER(0x5c6, 0x9075, 1), .driver_info = 0, },
+	{ USB_DEVICE_INTERFACE_NUMBER(0x5c6, 0x9079, 1), .driver_info = 1, },
+	{ USB_DEVICE_INTERFACE_NUMBER(0x5c6, 0x908A, 1), .driver_info = 0, },
+	{} /* terminating entry */
 };
 MODULE_DEVICE_TABLE(usb, hsic_sysmon_ids);
 
@@ -417,7 +419,6 @@ static struct usb_driver hsic_sysmon_driver = {
 	.disconnect =	hsic_sysmon_disconnect,
 	.suspend =	hsic_sysmon_suspend,
 	.resume =	hsic_sysmon_resume,
-	.reset_resume =	hsic_sysmon_reset_resume,
 	.id_table =	hsic_sysmon_ids,
 	.supports_autosuspend = 1,
 };
