@@ -38,16 +38,6 @@ config ANDROID_RAM_CONSOLE
 	select ANDROID_PERSISTENT_RAM
 	default n
 
-config DEBUG_BLDR_LOG
-	bool "Dump Bootloader log"
-	depends on ANDROID_RAM_CONSOLE
-	default n
-
-config DEBUG_LAST_BLDR_LOG
-        bool "Dump Bootloader log"
-        depends on ANDROID_RAM_CONSOLE
-        default n
-
 config PERSISTENT_TRACER
 	bool "Persistent function tracer"
 	depends on HAVE_FUNCTION_TRACER
