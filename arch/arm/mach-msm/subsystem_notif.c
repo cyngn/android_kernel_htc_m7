@@ -1,4 +1,4 @@
-/* Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -67,7 +67,7 @@ void *subsys_notif_register_notifier(
 
 	if (!subsys) {
 
-		
+		/* Possible first time reference to this subsystem. Add it. */
 		subsys = (struct subsys_notif_info *)
 				subsys_notif_add_subsys(subsys_name);
 

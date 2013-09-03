@@ -300,8 +300,6 @@ void msm_restart(char mode, const char *cmd)
 
 	printk(KERN_NOTICE "Going down for restart now\n");
 
-	printk(KERN_NOTICE "%s: Kernel command line: %s\n", __func__, hashed_command_line);
-
 	pm8xxx_reset_pwr_off(1);
 
 	pr_info("%s: restart by command: [%s]\r\n", __func__, (cmd) ? cmd : "");
