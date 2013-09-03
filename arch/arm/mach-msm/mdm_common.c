@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -30,305 +30,383 @@
 #include <linux/workqueue.h>
 #include <linux/clk.h>
 #include <linux/mfd/pmic8058.h>
+#include <linux/msm_charm.h>
 #include <asm/mach-types.h>
 #include <asm/uaccess.h>
 #include <mach/mdm2.h>
 #include <mach/restart.h>
 #include <mach/subsystem_notif.h>
 #include <mach/subsystem_restart.h>
-#include <linux/msm_charm.h>
-#include <mach/msm_watchdog.h>
+#include <mach/rpm.h>
+#include <mach/gpiomux.h>
+#include "msm_watchdog.h"
 #include "mdm_private.h"
 #include "sysmon.h"
-#include <mach/msm_rtb.h>
-
-#include <linux/proc_fs.h>
-#include <mach/board_htc.h>
-
-#ifdef CONFIG_HTC_POWEROFF_MODEM_IN_OFFMODE_CHARGING
-enum {
-	BOARD_MFG_MODE_NORMAL = 0,
-	BOARD_MFG_MODE_FACTORY2,
-	BOARD_MFG_MODE_RECOVERY,
-	BOARD_MFG_MODE_CHARGE,
-	BOARD_MFG_MODE_POWERTEST,
-	BOARD_MFG_MODE_OFFMODE_CHARGING,
-	BOARD_MFG_MODE_MFGKERNEL,
-	BOARD_MFG_MODE_MODEM_CALIBRATION,
-};
-#endif
-
-
-#if defined(pr_warn)
-#undef pr_warn
-#endif
-#define pr_warn(x...) do {				\
-			printk(KERN_WARN "[MDM][COMM] "x);		\
-	} while (0)
-
-#if defined(pr_debug)
-#undef pr_debug
-#endif
-#define pr_debug(x...) do {				\
-			printk(KERN_DEBUG "[MDM][COMM] "x);		\
-	} while (0)
-
-#if defined(pr_info)
-#undef pr_info
-#endif
-#define pr_info(x...) do {				\
-			printk(KERN_INFO "[MDM][COMM] "x);		\
-	} while (0)
-
-#if defined(pr_err)
-#undef pr_err
-#endif
-#define pr_err(x...) do {				\
-			printk(KERN_ERR "[MDM][COMM] "x);		\
-	} while (0)
-
-#define HTC_MDM_ERROR_CONFIRM_TIME_MS	10
 
 #define MDM_MODEM_TIMEOUT	6000
 #define MDM_MODEM_DELTA	100
 #define MDM_BOOT_TIMEOUT	60000L
-#define MDM_RDUMP_TIMEOUT	180000L
+#define MDM_RDUMP_TIMEOUT	120000L
+#define MDM2AP_STATUS_TIMEOUT_MS 60000L
 
-static int mdm_debug_on;
-static struct workqueue_struct *mdm_queue;
-static struct workqueue_struct *mdm_sfr_queue;
-static void mdm_status_fn(struct work_struct *work);
-static void dump_mdm_related_gpio(void);
-static DECLARE_WORK(mdm_status_work, mdm_status_fn);
-static struct workqueue_struct *mdm_gpio_monitor_queue;
-static bool mdm_status_change_notified;
-
-
+/* Allow a maximum device id of this many digits */
+#define MAX_DEVICE_DIGITS  10
 #define EXTERNAL_MODEM "external_modem"
+#define SUBSYS_NAME_LENGTH \
+	(sizeof(EXTERNAL_MODEM) + MAX_DEVICE_DIGITS)
 
-static struct mdm_modem_drv *mdm_drv;
-
-DECLARE_COMPLETION(mdm_needs_reload);
-DECLARE_COMPLETION(mdm_boot);
-DECLARE_COMPLETION(mdm_ram_dumps);
-
-static int first_boot = 1;
+#define DEVICE_BASE_NAME "mdm"
+#define DEVICE_NAME_LENGTH \
+	(sizeof(DEVICE_BASE_NAME) + MAX_DEVICE_DIGITS)
 
 #define RD_BUF_SIZE			100
 #define SFR_MAX_RETRIES		10
 #define SFR_RETRY_INTERVAL	1000
 
-
-#ifdef CONFIG_HTC_STORE_MODEM_RESET_INFO
-#define MODEM_ERRMSG_LIST_LEN 10
-
-struct mdm_msr_info {
-	int valid;
-	struct timespec msr_time;
-	char modem_errmsg[RD_BUF_SIZE];
+enum gpio_update_config {
+	GPIO_UPDATE_BOOTING_CONFIG = 1,
+	GPIO_UPDATE_RUNNING_CONFIG,
 };
-int mdm_msr_index = 0;
-static spinlock_t msr_info_lock;
-static struct mdm_msr_info msr_info_list[MODEM_ERRMSG_LIST_LEN];
-#endif
 
-static void dump_gpio(char *name, unsigned int gpio);
-static int set_mdm_errmsg(void __user *msg);
-static int notify_mdm_nv_write_done(void);
+struct mdm_device {
+	struct list_head		link;
+	struct mdm_modem_drv	mdm_data;
 
-static int mdm_loaded_status_proc(char *page, char **start, off_t off,
-				int count, int *eof, void *data)
+	int mdm2ap_status_valid_old_config;
+	struct gpiomux_setting mdm2ap_status_old_config;
+	int first_boot;
+	struct workqueue_struct *mdm_queue;
+	struct workqueue_struct *mdm_sfr_queue;
+	unsigned int dump_timeout_ms;
+
+	char subsys_name[SUBSYS_NAME_LENGTH];
+	struct subsys_desc mdm_subsys;
+	struct subsys_device *mdm_subsys_dev;
+
+	char device_name[DEVICE_NAME_LENGTH];
+	struct miscdevice misc_device;
+
+	struct completion mdm_needs_reload;
+	struct completion mdm_boot;
+	struct completion mdm_ram_dumps;
+	int mdm_errfatal_irq;
+	int mdm_status_irq;
+	int mdm_pblrdy_irq;
+
+	struct delayed_work mdm2ap_status_check_work;
+	struct work_struct mdm_status_work;
+	struct work_struct sfr_reason_work;
+
+	struct notifier_block mdm_panic_blk;
+	struct notifier_block ssr_notifier_blk;
+
+	int ssr_started_internally;
+};
+
+static struct list_head	mdm_devices;
+static DEFINE_SPINLOCK(mdm_devices_lock);
+static int disable_boot_timeout = 0;
+
+static int ssr_count;
+static DEFINE_SPINLOCK(ssr_lock);
+
+static unsigned int mdm_debug_mask;
+int vddmin_gpios_sent;
+static struct mdm_ops *mdm_ops;
+
+static void mdm_device_list_add(struct mdm_device *mdev)
 {
-	int ret;
-	char *p = page;
-
-	if (off > 0) {
-		ret = 0;
-	} else {
-		p += sprintf(p, "%d\n", mdm_drv->mdm_ready);
-		ret = p - page;
-	}
-
-	return ret;
-}
-
-static void mdm_loaded_info(void)
-{
-	struct proc_dir_entry *entry = NULL;
-
-	entry = create_proc_read_entry("mdm9k_status", 0, NULL, mdm_loaded_status_proc, NULL);
-}
-
-#ifdef CONFIG_HTC_STORE_MODEM_RESET_INFO
-static ssize_t modem_silent_reset_info_store(struct device *dev,
-		struct device_attribute *attr,	const char *buf, size_t count)
-{
-	int len = 0;
 	unsigned long flags;
 
-	spin_lock_irqsave(&msr_info_lock, flags);
-
-	msr_info_list[mdm_msr_index].valid = 1;
-	msr_info_list[mdm_msr_index].msr_time = current_kernel_time();
-	snprintf(msr_info_list[mdm_msr_index].modem_errmsg, RD_BUF_SIZE, "%s", buf);
-	len = strlen(msr_info_list[mdm_msr_index].modem_errmsg);
-	if(msr_info_list[mdm_msr_index].modem_errmsg[len-1] == '\n')
-	{
-		msr_info_list[mdm_msr_index].modem_errmsg[len-1] = '\0';
-	}
-
-	if(++mdm_msr_index >= MODEM_ERRMSG_LIST_LEN) {
-		mdm_msr_index = 0;
-	}
-
-	spin_unlock_irqrestore(&msr_info_lock, flags);
-
-	return count;
+	spin_lock_irqsave(&mdm_devices_lock, flags);
+	list_add_tail(&mdev->link, &mdm_devices);
+	spin_unlock_irqrestore(&mdm_devices_lock, flags);
 }
 
-static ssize_t modem_silent_reset_info_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
+static void mdm_device_list_remove(struct mdm_device *mdev)
 {
-	int i = 0;
-	char tmp[RD_BUF_SIZE+30];
 	unsigned long flags;
+	struct mdm_device *lmdev, *tmp;
 
-	spin_lock_irqsave(&msr_info_lock, flags);
-
-	for( i=0; i<MODEM_ERRMSG_LIST_LEN; i++ ) {
-		if( msr_info_list[i].valid != 0 ) {
-			
-			snprintf(tmp, RD_BUF_SIZE+30, "%ld-%s|\n\r", msr_info_list[i].msr_time.tv_sec, msr_info_list[i].modem_errmsg);
-			strcat(buf, tmp);
-			memset(tmp, 0, RD_BUF_SIZE+30);
+	spin_lock_irqsave(&mdm_devices_lock, flags);
+	list_for_each_entry_safe(lmdev, tmp, &mdm_devices, link) {
+		if (mdev && mdev == lmdev) {
+			pr_debug("%s: removing device id %d\n",
+			  __func__, mdev->mdm_data.device_id);
+			list_del(&mdev->link);
+			break;
 		}
-		msr_info_list[i].valid = 0;
-		memset(msr_info_list[i].modem_errmsg, 0, RD_BUF_SIZE);
 	}
-	strcat(buf, "\n\r\0");
-
-	spin_unlock_irqrestore(&msr_info_lock, flags);
-
-	return strlen(buf);
+	spin_unlock_irqrestore(&mdm_devices_lock, flags);
 }
-static DEVICE_ATTR(msr_info, S_IRUSR | S_IROTH | S_IRGRP | S_IWUSR,
-	modem_silent_reset_info_show, modem_silent_reset_info_store);
 
-static int modem_silent_reset_info_sysfs_attrs(struct platform_device *pdev)
+static int param_set_disable_boot_timeout(const char *val,
+		const struct kernel_param *kp)
 {
-	int i = 0;
+	int rcode;
+	pr_info("%s called\n",__func__);
+	rcode = param_set_bool(val, kp);
+	if (rcode)
+		pr_err("%s: Failed to set boot_timout_disabled flag\n",
+				__func__);
+	pr_info("%s: disable_boot_timeout is now %d\n",
+			__func__, disable_boot_timeout);
+	return rcode;
+}
+
+static struct kernel_param_ops disable_boot_timeout_ops = {
+	.set = param_set_disable_boot_timeout,
+	.get = param_get_bool,
+};
+module_param_cb(disable_boot_timeout, &disable_boot_timeout_ops,
+		&disable_boot_timeout, 0644);
+MODULE_PARM_DESC(disable_boot_timeout, "Disable panic on mdm bootup timeout");
+/* If the platform's cascading_ssr flag is set, the subsystem
+ * restart module will restart the other modems so stop
+ * monitoring them as well.
+ * This function can be called from interrupt context.
+ */
+static void mdm_start_ssr(struct mdm_device *mdev)
+{
+	unsigned long flags;
+	int start_ssr = 1;
+
+	spin_lock_irqsave(&ssr_lock, flags);
+	if (mdev->mdm_data.pdata->cascading_ssr &&
+			ssr_count > 0) {
+		start_ssr = 0;
+	} else {
+		ssr_count++;
+		mdev->ssr_started_internally = 1;
+	}
+	spin_unlock_irqrestore(&ssr_lock, flags);
+
+	if (start_ssr) {
+		atomic_set(&mdev->mdm_data.mdm_ready, 0);
+		pr_info("%s: Resetting mdm id %d due to mdm error\n",
+				__func__, mdev->mdm_data.device_id);
+		subsystem_restart_dev(mdev->mdm_subsys_dev);
+	} else {
+		pr_info("%s: Another modem is already in SSR\n",
+				__func__);
+	}
+}
+
+/* Increment the reference count to handle the case where
+ * subsystem restart is initiated by the SSR service.
+ */
+static void mdm_ssr_started(struct mdm_device *mdev)
+{
 	unsigned long flags;
 
-	spin_lock_irqsave(&msr_info_lock, flags);
+	spin_lock_irqsave(&ssr_lock, flags);
+	ssr_count++;
+	atomic_set(&mdev->mdm_data.mdm_ready, 0);
+	spin_unlock_irqrestore(&ssr_lock, flags);
+}
 
-	mdm_msr_index = 0;
-	for( i=0; i<MODEM_ERRMSG_LIST_LEN; i++ ) {
-		msr_info_list[i].valid = 0;
-		memset(msr_info_list[i].modem_errmsg, 0, RD_BUF_SIZE);
+/* mdm_ssr_completed assumes that mdm_ssr_started has previously
+ * been called.
+ */
+static void mdm_ssr_completed(struct mdm_device *mdev)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&ssr_lock, flags);
+	ssr_count--;
+	if (mdev->ssr_started_internally) {
+		mdev->ssr_started_internally = 0;
+		ssr_count--;
 	}
 
-	spin_unlock_irqrestore(&msr_info_lock, flags);
-
-	return device_create_file(&pdev->dev, &dev_attr_msr_info);
+	if (ssr_count < 0) {
+		pr_err("%s: ssr_count = %d\n",
+			    __func__, ssr_count);
+		panic("%s: ssr_count = %d < 0\n",
+			  __func__, ssr_count);
+	}
+	spin_unlock_irqrestore(&ssr_lock, flags);
 }
-#endif
 
+static irqreturn_t mdm_vddmin_change(int irq, void *dev_id)
+{
+	struct mdm_device *mdev = (struct mdm_device *)dev_id;
+	struct mdm_vddmin_resource *vddmin_res;
+	int value;
+
+	if (!mdev)
+		goto handled;
+
+	vddmin_res = mdev->mdm_data.pdata->vddmin_resource;
+	if (!vddmin_res)
+		goto handled;
+
+	value = gpio_get_value(
+	   vddmin_res->mdm2ap_vddmin_gpio);
+	if (value == 0)
+		pr_info("External Modem id %d entered Vddmin\n",
+				mdev->mdm_data.device_id);
+	else
+		pr_info("External Modem id %d exited Vddmin\n",
+				mdev->mdm_data.device_id);
+handled:
+	return IRQ_HANDLED;
+}
+
+/* The vddmin_res resource may not be supported by some platforms. */
+static void mdm_setup_vddmin_gpios(void)
+{
+	unsigned long flags;
+	struct msm_rpm_iv_pair req;
+	struct mdm_device *mdev;
+	struct mdm_vddmin_resource *vddmin_res;
+	int irq, ret;
+
+	spin_lock_irqsave(&mdm_devices_lock, flags);
+	list_for_each_entry(mdev, &mdm_devices, link) {
+		vddmin_res = mdev->mdm_data.pdata->vddmin_resource;
+		if (!vddmin_res)
+			continue;
+
+		pr_info("Enabling vddmin logging on modem id %d\n",
+				mdev->mdm_data.device_id);
+		req.id = vddmin_res->rpm_id;
+		req.value =
+			((uint32_t)vddmin_res->ap2mdm_vddmin_gpio & 0x0000FFFF)
+						<< 16;
+		req.value |= ((uint32_t)vddmin_res->modes & 0x000000FF) << 8;
+		req.value |= (uint32_t)vddmin_res->drive_strength & 0x000000FF;
+
+		msm_rpm_set(MSM_RPM_CTX_SET_0, &req, 1);
+
+		/* Start monitoring low power gpio from mdm */
+		irq = MSM_GPIO_TO_INT(vddmin_res->mdm2ap_vddmin_gpio);
+		if (irq < 0)
+			pr_err("%s: could not get LPM POWER IRQ resource mdm id %d.\n",
+				   __func__, mdev->mdm_data.device_id);
+		else {
+			ret = request_threaded_irq(irq, NULL, mdm_vddmin_change,
+				IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
+				"mdm lpm", mdev);
+
+			if (ret < 0)
+				pr_err("%s: MDM LPM IRQ#%d request failed with error=%d",
+					   __func__, irq, ret);
+		}
+	}
+	spin_unlock_irqrestore(&mdm_devices_lock, flags);
+	return;
+}
 
 static void mdm_restart_reason_fn(struct work_struct *work)
 {
 	int ret, ntries = 0;
 	char sfr_buf[RD_BUF_SIZE];
-#ifdef CONFIG_HTC_STORE_MODEM_RESET_INFO
-	unsigned long flags;
-#endif
+	struct mdm_platform_data *pdata;
+	struct mdm_device *mdev = container_of(work,
+			struct mdm_device, sfr_reason_work);
 
+	pdata = mdev->mdm_data.pdata;
 	do {
-		msleep(SFR_RETRY_INTERVAL);
-		ret = sysmon_get_reason(SYSMON_SS_EXT_MODEM,
+		if (pdata->sysmon_subsys_id_valid)
+		{
+			msleep(SFR_RETRY_INTERVAL);
+			ret = sysmon_get_reason(pdata->sysmon_subsys_id,
 					sfr_buf, sizeof(sfr_buf));
-		if (ret) {
-			pr_err("%s: Error retrieving mdm restart reason, ret = %d, "
-					"%d/%d tries\n", __func__, ret,
-					ntries + 1,	SFR_MAX_RETRIES);
-		} else {
-			pr_err("mdm restart reason: %s\n", sfr_buf);
-#ifdef CONFIG_HTC_STORE_MODEM_RESET_INFO
-			spin_lock_irqsave(&msr_info_lock, flags);
-
-			msr_info_list[mdm_msr_index].valid = 1;
-			msr_info_list[mdm_msr_index].msr_time = current_kernel_time();
-			snprintf(msr_info_list[mdm_msr_index].modem_errmsg, RD_BUF_SIZE, "%s", sfr_buf);
-			if(++mdm_msr_index >= MODEM_ERRMSG_LIST_LEN) {
-				mdm_msr_index = 0;
+			if (ret) {
+				/*
+				 * The sysmon device may not have been probed as
+				 * yet after the restart.
+				 */
+				pr_err("%s: Error retrieving restart reason,"
+						"ret = %d %d/%d tries\n",
+						__func__, ret,
+						ntries + 1,
+						SFR_MAX_RETRIES);
+			} else {
+				pr_err("mdm restart reason: %s\n", sfr_buf);
+				break;
 			}
-
-			spin_unlock_irqrestore(&msr_info_lock, flags);
-#endif
-			break;
 		}
 	} while (++ntries < SFR_MAX_RETRIES);
 }
 
-static DECLARE_WORK(sfr_reason_work, mdm_restart_reason_fn);
-
-static void mdm_status_check_fn(struct work_struct *work)
+static void mdm2ap_status_check(struct work_struct *work)
 {
-	int value = 0;
-
-	msleep(3000); 
-	pr_info("%s mdm_status_change notified? %c\n", __func__, mdm_status_change_notified ? 'Y': 'N');
-	if (!mdm_status_change_notified) {
-		dump_mdm_related_gpio();
-		value = gpio_get_value(mdm_drv->mdm2ap_status_gpio);
-		if (value == 1)
-			queue_work_on(0, mdm_queue, &mdm_status_work);
+	struct mdm_device *mdev =
+		container_of(work, struct mdm_device,
+					 mdm2ap_status_check_work.work);
+	struct mdm_modem_drv *mdm_drv = &mdev->mdm_data;
+	/*
+	 * If the mdm modem did not pull the MDM2AP_STATUS gpio
+	 * high then call subsystem_restart.
+	 */
+	if (!mdm_drv->disable_status_check) {
+		if (gpio_get_value(mdm_drv->mdm2ap_status_gpio) == 0) {
+			pr_err("%s: MDM2AP_STATUS did not go high on mdm id %d\n",
+				   __func__, mdev->mdm_data.device_id);
+			if (!disable_boot_timeout)
+				mdm_start_ssr(mdev);
+		}
 	}
 }
 
-static DECLARE_WORK(mdm_status_check_work, mdm_status_check_fn);
-
-#define MDM2AP_STATUS_CHANGE_MAX_WAIT_TIME		5000
-#define MDM2AP_STATUS_CHANGE_TOTAL_CHECK_TIME		20
-static int mdm_hsic_reconnectd_check_fn(void)
+static void mdm_update_gpio_configs(struct mdm_device *mdev,
+				enum gpio_update_config gpio_config)
 {
-	int ret = 0;
-	int i = 0, value = 0;
-	for ( i = 0; i <= MDM2AP_STATUS_CHANGE_TOTAL_CHECK_TIME; i++ ) {
-		value = gpio_get_value( mdm_drv->mdm2ap_status_gpio );
-		if ( value == 1 && mdm_drv->mdm_hsic_reconnectd == 1 ) {
-			ret = 1;
-			break;
-		}
-		if ( i < MDM2AP_STATUS_CHANGE_TOTAL_CHECK_TIME ) {
-			msleep( (MDM2AP_STATUS_CHANGE_MAX_WAIT_TIME / MDM2AP_STATUS_CHANGE_TOTAL_CHECK_TIME) );
-		}
-	}
-	if ( ret == 0 ) {
-		pr_info("%s: return 0, mdm_hsic_reconnectd=[%d]\n", __func__, mdm_drv->mdm_hsic_reconnectd);
-	} else {
-		pr_info("%s: return 1\n", __func__);
-	}
+	struct mdm_modem_drv *mdm_drv = &mdev->mdm_data;
 
-	return ret;
+	/* Some gpio configuration may need updating after modem bootup.*/
+	switch (gpio_config) {
+	case GPIO_UPDATE_RUNNING_CONFIG:
+		if (mdm_drv->pdata->mdm2ap_status_gpio_run_cfg) {
+			if (msm_gpiomux_write(mdm_drv->mdm2ap_status_gpio,
+				GPIOMUX_ACTIVE,
+				mdm_drv->pdata->mdm2ap_status_gpio_run_cfg,
+				&mdev->mdm2ap_status_old_config))
+				pr_err("%s: failed updating running gpio config mdm id %d\n",
+					   __func__, mdev->mdm_data.device_id);
+			else
+				mdev->mdm2ap_status_valid_old_config = 1;
+		}
+		break;
+	case GPIO_UPDATE_BOOTING_CONFIG:
+		if (mdev->mdm2ap_status_valid_old_config) {
+			msm_gpiomux_write(mdm_drv->mdm2ap_status_gpio,
+					GPIOMUX_ACTIVE,
+					&mdev->mdm2ap_status_old_config,
+					NULL);
+			mdev->mdm2ap_status_valid_old_config = 0;
+		}
+		break;
+	default:
+		pr_err("%s: called with no config\n", __func__);
+		break;
+	}
 }
 
-long mdm_modem_ioctl(struct file *filp, unsigned int cmd,
+static long mdm_modem_ioctl(struct file *filp, unsigned int cmd,
 				unsigned long arg)
 {
 	int status, ret = 0;
+	struct mdm_device *mdev = filp->private_data;
+	struct mdm_modem_drv *mdm_drv;
+	struct mdm_device *l_mdev;
 
 	if (_IOC_TYPE(cmd) != CHARM_CODE) {
-		pr_err("%s: invalid ioctl code\n", __func__);
+		pr_err("%s: invalid ioctl code to mdm id %d\n",
+			   __func__, mdev->mdm_data.device_id);
 		return -EINVAL;
 	}
 
-	pr_debug("%s: Entering ioctl cmd = %d\n", __func__, _IOC_NR(cmd));
+	mdm_drv = &mdev->mdm_data;
+	pr_debug("%s: Entering ioctl cmd = %d, mdm id = %d\n",
+			 __func__, _IOC_NR(cmd), mdev->mdm_data.device_id);
 	switch (cmd) {
 	case WAKE_CHARM:
-		pr_info("%s: Powering on mdm\n", __func__);
-		mdm_drv->mdm_ready = 0;	
-		mdm_drv->mdm_hsic_reconnectd = 0;
-		mdm_drv->ops->power_on_mdm_cb(mdm_drv);
+		pr_info("%s: Powering on mdm id %d\n",
+				__func__, mdev->mdm_data.device_id);
+		mdm_ops->power_on_mdm_cb(mdm_drv);
 		break;
 	case CHECK_FOR_BOOT:
 		if (gpio_get_value(mdm_drv->mdm2ap_status_gpio) == 0)
@@ -337,39 +415,34 @@ long mdm_modem_ioctl(struct file *filp, unsigned int cmd,
 			put_user(0, (unsigned long __user *) arg);
 		break;
 	case NORMAL_BOOT_DONE:
-		{
-			int ret_mdm_hsic_reconnectd = 0;
-			pr_debug("%s: check if mdm is booted up\n", __func__);
-			get_user(status, (unsigned long __user *) arg);
-			if (status) {
-				pr_debug("%s: normal boot failed\n", __func__);
-				mdm_drv->mdm_boot_status = -EIO;
-			} else {
-				pr_info("%s: normal boot done\n", __func__);
-				mdm_drv->mdm_boot_status = 0;
-			}
-			
-	                mdm_status_change_notified = false;
-	                queue_work_on(0, mdm_gpio_monitor_queue, &mdm_status_check_work);
-	                
-			mdm_drv->mdm_ready = 1;
-
-			if (mdm_drv->ops->normal_boot_done_cb != NULL)
-				mdm_drv->ops->normal_boot_done_cb(mdm_drv);
-
-			ret_mdm_hsic_reconnectd = mdm_hsic_reconnectd_check_fn();
-
-			if ( ret_mdm_hsic_reconnectd == 1 ) {
-				pr_info("%s: ret_mdm_hsic_reconnectd == 1\n", __func__);
-			} else {
-				pr_info("%s: ret_mdm_hsic_reconnectd == 0\n", __func__);
-			}
-
-			if (!first_boot)
-				complete(&mdm_boot);
-			else
-				first_boot = 0;
+		pr_debug("%s: check if mdm id %d is booted up\n",
+				 __func__, mdev->mdm_data.device_id);
+		get_user(status, (unsigned long __user *) arg);
+		if (status) {
+			pr_debug("%s: normal boot of mdm id %d failed\n",
+					 __func__, mdev->mdm_data.device_id);
+			mdm_drv->mdm_boot_status = -EIO;
+		} else {
+			pr_info("%s: normal boot of mdm id %d done\n",
+					__func__, mdev->mdm_data.device_id);
+			mdm_drv->mdm_boot_status = 0;
 		}
+		atomic_set(&mdm_drv->mdm_ready, 1);
+
+		if (mdm_ops->normal_boot_done_cb != NULL)
+			mdm_ops->normal_boot_done_cb(mdm_drv);
+
+		if (!mdev->first_boot)
+			complete(&mdev->mdm_boot);
+		else
+			mdev->first_boot = 0;
+
+		/* If successful, start a timer to check that the mdm2ap_status
+		 * gpio goes high.
+		 */
+		if (!status && gpio_get_value(mdm_drv->mdm2ap_status_gpio) == 0)
+			schedule_delayed_work(&mdev->mdm2ap_status_check_work,
+				msecs_to_jiffies(MDM2AP_STATUS_TIMEOUT_MS));
 		break;
 	case RAM_DUMP_DONE:
 		pr_debug("%s: mdm done collecting RAM dumps\n", __func__);
@@ -380,292 +453,152 @@ long mdm_modem_ioctl(struct file *filp, unsigned int cmd,
 			pr_info("%s: ramdump collection completed\n", __func__);
 			mdm_drv->mdm_ram_dump_status = 0;
 		}
-		complete(&mdm_ram_dumps);
+		complete(&mdev->mdm_ram_dumps);
 		break;
 	case WAIT_FOR_RESTART:
 		pr_debug("%s: wait for mdm to need images reloaded\n",
 				__func__);
-
-		if (mdm_drv) {
-	        dump_gpio("MDM2AP_STATUS", mdm_drv->mdm2ap_status_gpio);
-	        dump_gpio("MDM2AP_ERRFATAL", mdm_drv->mdm2ap_errfatal_gpio);
-		}
-
-		ret = wait_for_completion_interruptible(&mdm_needs_reload);
-		if (!ret && mdm_drv) {
+		ret = wait_for_completion_interruptible(
+				&mdev->mdm_needs_reload);
+		if (!ret)
 			put_user(mdm_drv->boot_type,
 					 (unsigned long __user *) arg);
-
-			pr_err("%s: mdm_drv->boot_type:%d\n", __func__, mdm_drv->boot_type);
+		init_completion(&mdev->mdm_needs_reload);
+		break;
+	case GET_DLOAD_STATUS:
+		pr_debug("getting status of mdm2ap_errfatal_gpio\n");
+		if (gpio_get_value(mdm_drv->mdm2ap_errfatal_gpio) == 1 &&
+			!atomic_read(&mdm_drv->mdm_ready))
+			put_user(1, (unsigned long __user *) arg);
+		else
+			put_user(0, (unsigned long __user *) arg);
+		break;
+	case IMAGE_UPGRADE:
+		pr_debug("%s Image upgrade ioctl recieved\n", __func__);
+		if (mdm_drv->pdata->image_upgrade_supported &&
+				mdm_ops->image_upgrade_cb) {
+			list_for_each_entry(l_mdev, &mdm_devices, link) {
+				if (l_mdev != mdev) {
+					pr_debug("%s:setting mdm_rdy to false",
+							__func__);
+					atomic_set(&l_mdev->mdm_data.mdm_ready,
+							0);
+				}
+			}
+			get_user(status, (unsigned long __user *) arg);
+			mdm_ops->image_upgrade_cb(mdm_drv, status);
+		} else
+			pr_debug("%s Image upgrade not supported\n", __func__);
+		break;
+	case SHUTDOWN_CHARM:
+		if (!mdm_drv->pdata->send_shdn ||
+				!mdm_drv->pdata->sysmon_subsys_id_valid) {
+			pr_debug("%s shutdown not supported for this mdm\n",
+					__func__);
+			break;
 		}
-		INIT_COMPLETION(mdm_needs_reload);
-		break;
-	case GET_MFG_MODE:
-		pr_info("%s: board_mfg_mode()=%d\n", __func__, board_mfg_mode());
-		put_user(board_mfg_mode(),
-				 (unsigned long __user *) arg);
-		break;
-	case SET_MODEM_ERRMSG:
-		pr_info("%s: Set modem fatal errmsg\n", __func__);
-		ret = set_mdm_errmsg((void __user *) arg);
-		break;
-	case GET_RADIO_FLAG:
-		pr_info("%s:get_radio_flag()=%x\n", __func__, get_radio_flag());
-
-		
-		if ((get_radio_flag() & RADIO_FLAG_USB_UPLOAD) && mdm_drv != NULL) {
-			pr_info("AP2MDM_STATUS GPIO:%d\n", mdm_drv->ap2mdm_status_gpio);
-			pr_info("AP2MDM_ERRFATAL GPIO:%d\n", mdm_drv->ap2mdm_errfatal_gpio);
-			pr_info("AP2MDM_PMIC_RESET_N GPIO:%d\n", mdm_drv->ap2mdm_pmic_reset_n_gpio);
-			pr_info("MDM2AP_STATUS GPIO:%d\n", mdm_drv->mdm2ap_status_gpio);
-			pr_info("MDM2AP_ERRFATAL GPIO:%d\n", mdm_drv->mdm2ap_errfatal_gpio);
-			pr_info("MDM2AP_HSIC_READY GPIO:%d\n", mdm_drv->mdm2ap_hsic_ready_gpio);
-			pr_info("AP2MDM_IPC1 GPIO:%d\n", mdm_drv->ap2mdm_ipc1_gpio);
-		}
-		
-
-		put_user(get_radio_flag(),
-				 (unsigned long __user *) arg);
-		break;
-	case EFS_SYNC_DONE:
-		pr_info("%s: efs sync is done\n", __func__);
-		break;
-	case NV_WRITE_DONE:
-		pr_info("%s: NV write done!\n", __func__);
-		notify_mdm_nv_write_done();
-		break;
-	case HTC_POWER_OFF_CHARM:
-		pr_info("%s: (HTC_POWER_OFF_CHARM)Powering off mdm\n", __func__);
-		if ( mdm_drv->ops->htc_power_down_mdm_cb ) {
-			mdm_drv->mdm_ready = 0;
-			mdm_drv->mdm_hsic_reconnectd = 0;
-			mdm_drv->ops->htc_power_down_mdm_cb(mdm_drv);
-		}
-		break;
-	case HTC_UPDATE_CRC_RESTART_LEVEL:
-		pr_info("%s: (HTC_UPDATE_CRC_RESTART_LEVEL)\n", __func__);
-		subsystem_update_restart_level_for_crc();
+		atomic_set(&mdm_drv->mdm_ready, 0);
+		if (mdm_debug_mask & MDM_DEBUG_MASK_SHDN_LOG)
+			pr_info("Sending shutdown request to mdm\n");
+		ret = sysmon_send_shutdown(mdm_drv->pdata->sysmon_subsys_id);
+		if (ret)
+			pr_err("%s:Graceful shutdown of mdm failed, ret = %d\n",
+			   __func__, ret);
+		put_user(ret, (unsigned long __user *) arg);
 		break;
 	default:
 		pr_err("%s: invalid ioctl cmd = %d\n", __func__, _IOC_NR(cmd));
 		ret = -EINVAL;
 		break;
 	}
-
 	return ret;
 }
 
-static void dump_gpio(char *name, unsigned int gpio)
-{
-        if (gpio == 0) {
-               pr_err("%s: Cannot dump %s, due to invalid gpio number %d\n", __func__, name, gpio);
-                return;
-       }
-        pr_info("%s: %s\t= %d\n", __func__, name, gpio_get_value(gpio));
-
-	return;
-}
-
-static void dump_mdm_related_gpio(void)
-{
-        dump_gpio("AP2MDM_STATUS", mdm_drv->ap2mdm_status_gpio);
-        
-        dump_gpio("AP2MDM_ERRFATAL", mdm_drv->ap2mdm_errfatal_gpio);
-        dump_gpio("AP2MDM_PMIC_RESET_N", mdm_drv->ap2mdm_pmic_reset_n_gpio);
-
-        dump_gpio("MDM2AP_STATUS", mdm_drv->mdm2ap_status_gpio);
-        
-        dump_gpio("MDM2AP_ERRFATAL", mdm_drv->mdm2ap_errfatal_gpio);
-
-	return;
-}
-
-static char modem_errmsg[MODEM_ERRMSG_LEN];
-static int set_mdm_errmsg(void __user *msg)
-{
-	memset(modem_errmsg, 0, sizeof(modem_errmsg));
-	if (unlikely(copy_from_user(modem_errmsg, msg, MODEM_ERRMSG_LEN))) {
-		pr_err("%s: copy modem_errmsg failed\n", __func__);
-		return -EFAULT;
-	}
-	modem_errmsg[MODEM_ERRMSG_LEN-1] = '\0';
-	pr_info("%s: set modem errmsg: %s\n", __func__, modem_errmsg);
-	return 0;
-}
-
-char *get_mdm_errmsg(void)
-{
-	if (strlen(modem_errmsg) <= 0) {
-		pr_err("%s: can not get mdm errmsg.\n", __func__);
-		return NULL;
-	}
-	return modem_errmsg;
-}
-EXPORT_SYMBOL(get_mdm_errmsg);
-
-static int notify_mdm_nv_write_done(void)
-{
-	gpio_direction_output(mdm_drv->ap2mdm_ipc1_gpio, 1);
-	msleep(1);
-	gpio_direction_output(mdm_drv->ap2mdm_ipc1_gpio, 0);
-	return 0;
-}
-
-
-extern void set_mdm2ap_errfatal_restart_flag(unsigned);		
-static void mdm_fatal_fn(struct work_struct *work)
-{
-	
-	int i;
-	int value = gpio_get_value(mdm_drv->mdm2ap_errfatal_gpio);
-
-	if (value == 1) {
-		for (i = HTC_MDM_ERROR_CONFIRM_TIME_MS; i > 0; i--) {
-			msleep(1);
-			if (gpio_get_value(mdm_drv->mdm2ap_errfatal_gpio) == 0) {
-				pr_info("%s: mdm fatal high %d(ms) confirm failed... Abort!\n", __func__, HTC_MDM_ERROR_CONFIRM_TIME_MS);
-				return;
-			}
-		}
-	} else if (value == 0) {
-		pr_info("%s: mdm fatal high is a false alarm!\n", __func__);
-		return;
-	}
-
-	dump_mdm_related_gpio();
-
-	
-	pr_info("### Show Blocked State in ###\n");
-	show_state_filter(TASK_UNINTERRUPTIBLE);
-	//if (get_restart_level() == RESET_SOC)
-	//	msm_rtb_disable();
-
-	if (get_restart_level() == RESET_SOC)
-		set_mdm2ap_errfatal_restart_flag(1);
-	
-
-	pr_info("%s: Reseting the mdm due to an errfatal\n", __func__);
-
-	subsystem_restart(EXTERNAL_MODEM);
-}
-
-static DECLARE_WORK(mdm_fatal_work, mdm_fatal_fn);
-
 static void mdm_status_fn(struct work_struct *work)
 {
-	int i;
+	struct mdm_device *mdev =
+		container_of(work, struct mdm_device, mdm_status_work);
+	struct mdm_modem_drv *mdm_drv = &mdev->mdm_data;
 	int value = gpio_get_value(mdm_drv->mdm2ap_status_gpio);
 
-	if (!mdm_drv->mdm_ready)
-		return;
-
-	
-	if (value == 0) {
-		for (i = HTC_MDM_ERROR_CONFIRM_TIME_MS; i > 0; i--) {
-			msleep(1);
-			if (gpio_get_value(mdm_drv->mdm2ap_status_gpio) == 1) {
-				pr_info("%s: mdm status low %d(ms) confirm failed... Abort!\n", __func__, HTC_MDM_ERROR_CONFIRM_TIME_MS);
-				return;
-			}
-		}
-	}
-	
-
-	if ( ( get_radio_flag() & RADIO_FLAG_USB_UPLOAD ) ) {
-		if ( value == 0 ) {
-			int val_gpio = 0;
-			msleep(40);
-			val_gpio = gpio_get_value(mdm_drv->mdm2ap_hsic_ready_gpio);
-			pr_info("%s:mdm2ap_hsic_ready_gpio=[%d]\n", __func__, val_gpio);
-		}
-	}
-
-	
-	mdm_status_change_notified = true;
-	
-	mdm_drv->ops->status_cb(mdm_drv, value);
-
 	pr_debug("%s: status:%d\n", __func__, value);
+	if (atomic_read(&mdm_drv->mdm_ready) && mdm_ops->status_cb)
+		mdm_ops->status_cb(mdm_drv, value);
 
-	if (value == 0) {
-		pr_info("%s: unexpected reset external modem\n", __func__);
-
-		
-		dump_mdm_related_gpio();
-
-		
-		pr_info("### Show Blocked State in ###\n");
-		show_state_filter(TASK_UNINTERRUPTIBLE);
-		if (get_restart_level() == RESET_SOC)
-	//		msm_rtb_disable();
-
-		if (get_restart_level() == RESET_SOC)
-			set_mdm2ap_errfatal_restart_flag(1);
-		
-
-		subsystem_restart(EXTERNAL_MODEM);
-	} else if (value == 1) {
-		pr_info("%s: status = 1: mdm is now ready\n", __func__);
-	}
+	/* Update gpio configuration to "running" config. */
+	mdm_update_gpio_configs(mdev, GPIO_UPDATE_RUNNING_CONFIG);
 }
 
-#ifdef CONFIG_QSC_MODEM
-void qsc_boot_after_mdm_bootloader(int state);
-static void qsc_boot_up_fn(struct work_struct *work)
+static void mdm_disable_irqs(struct mdm_device *mdev)
 {
-	free_irq(mdm_drv->mdm2ap_bootloader_irq, NULL);
-
-	qsc_boot_after_mdm_bootloader(MDM_BOOTLOAER_GPIO_IRQ_RECEIVED);
-}
-static DECLARE_WORK(qsc_boot_up_work, qsc_boot_up_fn);
-#endif
-
-static void mdm_disable_irqs(void)
-{
-	disable_irq_nosync(mdm_drv->mdm_errfatal_irq);
-	disable_irq_nosync(mdm_drv->mdm_status_irq);
-
+	if (!mdev)
+		return;
+	disable_irq_nosync(mdev->mdm_errfatal_irq);
+	disable_irq_nosync(mdev->mdm_status_irq);
+	disable_irq_nosync(mdev->mdm_pblrdy_irq);
 }
 
 static irqreturn_t mdm_errfatal(int irq, void *dev_id)
 {
-	pr_err("%s: detect mdm errfatal pin rising\n", __func__);
+	struct mdm_modem_drv *mdm_drv;
+	struct mdm_device *mdev = (struct mdm_device *)dev_id;
+	if (!mdev)
+		return IRQ_HANDLED;
 
-	if (mdm_drv->mdm_ready &&
+	pr_debug("%s: mdm id %d sent errfatal interrupt\n",
+			 __func__, mdev->mdm_data.device_id);
+	mdm_drv = &mdev->mdm_data;
+	if (atomic_read(&mdm_drv->mdm_ready) &&
 		(gpio_get_value(mdm_drv->mdm2ap_status_gpio) == 1)) {
-		pr_err("%s: mdm got errfatal interrupt\n", __func__);
-		pr_debug("%s: scheduling work now\n", __func__);
-		queue_work_on(0, mdm_queue, &mdm_fatal_work);	
+		pr_info("%s: Received err fatal from mdm id %d\n",
+				__func__, mdev->mdm_data.device_id);
+		mdm_start_ssr(mdev);
 	}
 	return IRQ_HANDLED;
 }
 
+/* set the mdm_device as the file's private data */
 static int mdm_modem_open(struct inode *inode, struct file *file)
 {
+	struct miscdevice *misc = file->private_data;
+	struct mdm_device *mdev = container_of(misc,
+			struct mdm_device, misc_device);
+
+	file->private_data = mdev;
 	return 0;
 }
 
-static const struct file_operations mdm_modem_fops = {
-	.owner		= THIS_MODULE,
-	.open		= mdm_modem_open,
-	.unlocked_ioctl	= mdm_modem_ioctl,
-};
+static int ssr_notifier_cb(struct notifier_block *this,
+				unsigned long code,
+				void *data)
+{
+	struct mdm_device *mdev =
+		container_of(this, struct mdm_device, ssr_notifier_blk);
 
+	switch (code) {
+	case SUBSYS_AFTER_POWERUP:
+		mdm_ssr_completed(mdev);
+		break;
+	default:
+		break;
+	}
 
-static struct miscdevice mdm_modem_misc = {
-	.minor	= MISC_DYNAMIC_MINOR,
-	.name	= "mdm",
-	.fops	= &mdm_modem_fops
-};
+	return NOTIFY_DONE;
+}
 
 static int mdm_panic_prep(struct notifier_block *this,
 				unsigned long event, void *ptr)
 {
 	int i;
+	struct mdm_modem_drv *mdm_drv;
+	struct mdm_device *mdev =
+		container_of(this, struct mdm_device, mdm_panic_blk);
+
+	mdm_drv = &mdev->mdm_data;
 
 	pr_debug("%s: setting AP2MDM_ERRFATAL high for a non graceful reset\n",
 			 __func__);
-	mdm_disable_irqs();
+	mdm_disable_irqs(mdev);
 	gpio_set_value(mdm_drv->ap2mdm_errfatal_gpio, 1);
 
 	for (i = MDM_MODEM_TIMEOUT; i > 0; i -= MDM_MODEM_DELTA) {
@@ -674,113 +607,187 @@ static int mdm_panic_prep(struct notifier_block *this,
 		if (gpio_get_value(mdm_drv->mdm2ap_status_gpio) == 0)
 			break;
 	}
-	if (i <= 0)
+	if (i <= 0) {
 		pr_err("%s: MDM2AP_STATUS never went low\n", __func__);
+		/* Reset the modem so that it will go into download mode. */
+		if (mdm_drv && mdm_ops->atomic_reset_mdm_cb)
+			mdm_ops->atomic_reset_mdm_cb(mdm_drv);
+	}
 	return NOTIFY_DONE;
 }
 
-static struct notifier_block mdm_panic_blk = {
-	.notifier_call  = mdm_panic_prep,
-};
-
 static irqreturn_t mdm_status_change(int irq, void *dev_id)
 {
-	pr_debug("%s: mdm sent status change interrupt\n", __func__);
+	struct mdm_modem_drv *mdm_drv;
+	struct mdm_device *mdev = (struct mdm_device *)dev_id;
+	int value;
+	if (!mdev)
+		return IRQ_HANDLED;
 
-	queue_work_on(0, mdm_queue, &mdm_status_work);		
+	mdm_drv = &mdev->mdm_data;
+	value = gpio_get_value(mdm_drv->mdm2ap_status_gpio);
 
+	if ((mdm_debug_mask & MDM_DEBUG_MASK_SHDN_LOG) && (value == 0))
+		pr_info("%s: mdm2ap_status went low\n", __func__);
+
+	pr_debug("%s: mdm id %d sent status change interrupt\n",
+			 __func__, mdev->mdm_data.device_id);
+	if (value == 0 && atomic_read(&mdm_drv->mdm_ready)) {
+		pr_info("%s: unexpected reset external modem id %d\n",
+				__func__, mdev->mdm_data.device_id);
+		mdm_drv->mdm_unexpected_reset_occurred = 1;
+		mdm_start_ssr(mdev);
+	} else if (value == 1) {
+		cancel_delayed_work(&mdev->mdm2ap_status_check_work);
+		pr_info("%s: status = 1: mdm id %d is now ready\n",
+				__func__, mdev->mdm_data.device_id);
+		queue_work(mdev->mdm_queue, &mdev->mdm_status_work);
+	}
 	return IRQ_HANDLED;
 }
 
-#ifdef CONFIG_QSC_MODEM
-static irqreturn_t mdm_in_bootloader(int irq, void *dev_id)
+static irqreturn_t mdm_pblrdy_change(int irq, void *dev_id)
 {
-	pr_info("%s: got mdm2ap_bootloader interrupt\n", __func__);
+	struct mdm_modem_drv *mdm_drv;
+	struct mdm_device *mdev = (struct mdm_device *)dev_id;
+	if (!mdev)
+		return IRQ_HANDLED;
 
-	queue_work(mdm_queue, &qsc_boot_up_work);
-
+	mdm_drv = &mdev->mdm_data;
+	pr_info("%s: mdm id %d: pbl ready:%d\n",
+			__func__, mdev->mdm_data.device_id,
+			gpio_get_value(mdm_drv->mdm2ap_pblrdy));
 	return IRQ_HANDLED;
 }
-#endif
 
-static int mdm_subsys_shutdown(const struct subsys_data *crashed_subsys)
+static int mdm_subsys_shutdown(const struct subsys_desc *crashed_subsys)
 {
-	mdm_drv->mdm_ready = 0;
-	gpio_direction_output(mdm_drv->ap2mdm_errfatal_gpio, 1);
+	struct mdm_device *mdev =
+	 container_of(crashed_subsys, struct mdm_device, mdm_subsys);
+	struct mdm_modem_drv *mdm_drv = &mdev->mdm_data;
+
+	pr_debug("%s: ssr on modem id %d\n", __func__,
+			 mdev->mdm_data.device_id);
+
+	mdm_ssr_started(mdev);
+	cancel_delayed_work(&mdev->mdm2ap_status_check_work);
+
+	if (!mdm_drv->pdata->no_a2m_errfatal_on_ssr)
+		gpio_direction_output(mdm_drv->ap2mdm_errfatal_gpio, 1);
+
 	if (mdm_drv->pdata->ramdump_delay_ms > 0) {
+		/* Wait for the external modem to complete
+		 * its preparation for ramdumps.
+		 */
 		msleep(mdm_drv->pdata->ramdump_delay_ms);
 	}
-	mdm_drv->ops->power_down_mdm_cb(mdm_drv);
+	if (!mdm_drv->mdm_unexpected_reset_occurred) {
+		mdm_ops->reset_mdm_cb(mdm_drv);
+		/* Update gpio configuration to "booting" config. */
+		mdm_update_gpio_configs(mdev, GPIO_UPDATE_BOOTING_CONFIG);
+	} else {
+		mdm_drv->mdm_unexpected_reset_occurred = 0;
+	}
 	return 0;
 }
 
-static int mdm_subsys_powerup(const struct subsys_data *crashed_subsys)
+static int mdm_subsys_powerup(const struct subsys_desc *crashed_subsys)
 {
+	struct mdm_device *mdev =
+		container_of(crashed_subsys, struct mdm_device,
+					 mdm_subsys);
+	struct mdm_modem_drv *mdm_drv = &mdev->mdm_data;
+
+	pr_debug("%s: ssr on modem id %d\n",
+			 __func__, mdev->mdm_data.device_id);
+
 	gpio_direction_output(mdm_drv->ap2mdm_errfatal_gpio, 0);
 	gpio_direction_output(mdm_drv->ap2mdm_status_gpio, 1);
-	
+
+	if (mdm_drv->pdata->ps_hold_delay_ms > 0)
+		msleep(mdm_drv->pdata->ps_hold_delay_ms);
+
+	mdm_ops->power_on_mdm_cb(mdm_drv);
 	mdm_drv->boot_type = CHARM_NORMAL_BOOT;
-	pr_info("%s: mdm_needs_reload\n", __func__);
-	complete(&mdm_needs_reload);
-	if (!wait_for_completion_timeout(&mdm_boot,
+	complete(&mdev->mdm_needs_reload);
+	if (!wait_for_completion_timeout(&mdev->mdm_boot,
 			msecs_to_jiffies(MDM_BOOT_TIMEOUT))) {
 		mdm_drv->mdm_boot_status = -ETIMEDOUT;
 		pr_info("%s: mdm modem restart timed out.\n", __func__);
 	} else {
-		pr_info("%s: mdm modem has been restarted\n", __func__);
-		
-		queue_work_on(0, mdm_sfr_queue, &sfr_reason_work);	
+		pr_info("%s: id %d: mdm modem has been restarted\n",
+				__func__, mdm_drv->device_id);
+
+		/* Log the reason for the restart */
+		if (mdm_drv->pdata->sfr_query)
+			queue_work(mdev->mdm_sfr_queue, &mdev->sfr_reason_work);
 	}
-	INIT_COMPLETION(mdm_boot);
+	init_completion(&mdev->mdm_boot);
 	return mdm_drv->mdm_boot_status;
 }
 
 static int mdm_subsys_ramdumps(int want_dumps,
-				const struct subsys_data *crashed_subsys)
+				const struct subsys_desc *crashed_subsys)
 {
+	struct mdm_device *mdev =
+		container_of(crashed_subsys, struct mdm_device,
+					 mdm_subsys);
+	struct mdm_modem_drv *mdm_drv = &mdev->mdm_data;
+
+	pr_debug("%s: ssr on modem id %d\n", __func__,
+			 mdev->mdm_data.device_id);
+
 	mdm_drv->mdm_ram_dump_status = 0;
+	cancel_delayed_work(&mdev->mdm2ap_status_check_work);
 	if (want_dumps) {
 		mdm_drv->boot_type = CHARM_RAM_DUMPS;
-		complete(&mdm_needs_reload);
-		if (!wait_for_completion_timeout(&mdm_ram_dumps,
-				msecs_to_jiffies(MDM_RDUMP_TIMEOUT))) {
+		complete(&mdev->mdm_needs_reload);
+		if (!wait_for_completion_timeout(&mdev->mdm_ram_dumps,
+				msecs_to_jiffies(mdev->dump_timeout_ms))) {
 			mdm_drv->mdm_ram_dump_status = -ETIMEDOUT;
-			pr_info("%s: mdm modem ramdumps timed out.\n",
+			pr_err("%s: mdm modem ramdumps timed out.\n",
 					__func__);
 		} else
 			pr_info("%s: mdm modem ramdumps completed.\n",
 					__func__);
-		INIT_COMPLETION(mdm_ram_dumps);
-		gpio_direction_output(mdm_drv->ap2mdm_errfatal_gpio, 1);
-		mdm_drv->ops->power_down_mdm_cb(mdm_drv);
+		init_completion(&mdev->mdm_ram_dumps);
+		if (!mdm_drv->pdata->no_powerdown_after_ramdumps) {
+			mdm_ops->power_down_mdm_cb(mdm_drv);
+			/* Update gpio configuration to "booting" config. */
+			mdm_update_gpio_configs(mdev,
+						GPIO_UPDATE_BOOTING_CONFIG);
+		}
 	}
 	return mdm_drv->mdm_ram_dump_status;
 }
 
-static struct subsys_data mdm_subsystem = {
-	.shutdown = mdm_subsys_shutdown,
-	.ramdump = mdm_subsys_ramdumps,
-	.powerup = mdm_subsys_powerup,
-	.name = EXTERNAL_MODEM,
-};
-
-static int mdm_debug_on_set(void *data, u64 val)
+/* Once the gpios are sent to RPM and debugging
+ * starts, there is no way to stop it without
+ * rebooting the device.
+ */
+static int mdm_debug_mask_set(void *data, u64 val)
 {
-	mdm_debug_on = val;
-	if (mdm_drv->ops->debug_state_changed_cb)
-		mdm_drv->ops->debug_state_changed_cb(mdm_debug_on);
+	if (!vddmin_gpios_sent &&
+		(val & MDM_DEBUG_MASK_VDDMIN_SETUP)) {
+		mdm_setup_vddmin_gpios();
+		vddmin_gpios_sent = 1;
+	}
+
+	mdm_debug_mask = val;
+	if (mdm_ops->debug_state_changed_cb)
+		mdm_ops->debug_state_changed_cb(mdm_debug_mask);
 	return 0;
 }
 
-static int mdm_debug_on_get(void *data, u64 *val)
+static int mdm_debug_mask_get(void *data, u64 *val)
 {
-	*val = mdm_debug_on;
+	*val = mdm_debug_mask;
 	return 0;
 }
 
-DEFINE_SIMPLE_ATTRIBUTE(mdm_debug_on_fops,
-			mdm_debug_on_get,
-			mdm_debug_on_set, "%llu\n");
+DEFINE_SIMPLE_ATTRIBUTE(mdm_debug_mask_fops,
+			mdm_debug_mask_get,
+			mdm_debug_mask_set, "%llu\n");
 
 static int mdm_debugfs_init(void)
 {
@@ -790,412 +797,428 @@ static int mdm_debugfs_init(void)
 	if (IS_ERR(dent))
 		return PTR_ERR(dent);
 
-	debugfs_create_file("debug_on", 0644, dent, NULL,
-			&mdm_debug_on_fops);
+	debugfs_create_file("debug_mask", 0644, dent, NULL,
+			&mdm_debug_mask_fops);
 	return 0;
 }
 
-static void mdm_modem_initialize_data(struct platform_device  *pdev,
-				struct mdm_ops *mdm_ops)
+static const struct file_operations mdm_modem_fops = {
+	.owner		= THIS_MODULE,
+	.open		= mdm_modem_open,
+	.unlocked_ioctl	= mdm_modem_ioctl,
+};
+
+static void mdm_modem_initialize_data(struct platform_device *pdev,
+						struct mdm_device *mdev)
 {
+	struct mdm_modem_drv *mdm_drv = &mdev->mdm_data;
 	struct resource *pres;
 
-	
+	mdm_drv->pdata    = pdev->dev.platform_data;
+	if (pdev->id < 0)
+		mdm_drv->device_id   = 0;
+	else
+		mdm_drv->device_id   = pdev->id;
+
+	memset((void *)&mdev->mdm_subsys, 0,
+		   sizeof(struct subsys_desc));
+	if (mdm_drv->pdata->subsys_name) {
+		strlcpy(mdev->subsys_name, mdm_drv->pdata->subsys_name,
+				sizeof(mdev->subsys_name));
+	} else {
+		if (mdev->mdm_data.device_id <= 0)
+			snprintf(mdev->subsys_name, sizeof(mdev->subsys_name),
+				"%s",  EXTERNAL_MODEM);
+		else
+			snprintf(mdev->subsys_name, sizeof(mdev->subsys_name),
+				"%s.%d",  EXTERNAL_MODEM,
+				mdev->mdm_data.device_id);
+	}
+	mdev->mdm_subsys.shutdown = mdm_subsys_shutdown;
+	mdev->mdm_subsys.ramdump = mdm_subsys_ramdumps;
+	mdev->mdm_subsys.powerup = mdm_subsys_powerup;
+	mdev->mdm_subsys.name = mdev->subsys_name;
+
+	memset((void *)&mdev->misc_device, 0,
+		   sizeof(struct miscdevice));
+	if (mdev->mdm_data.device_id <= 0)
+		snprintf(mdev->device_name, sizeof(mdev->device_name),
+			 "%s",  DEVICE_BASE_NAME);
+	else
+		snprintf(mdev->device_name, sizeof(mdev->device_name),
+			 "%s%d",  DEVICE_BASE_NAME, mdev->mdm_data.device_id);
+	mdev->misc_device.minor	= MISC_DYNAMIC_MINOR;
+	mdev->misc_device.name	= mdev->device_name;
+	mdev->misc_device.fops	= &mdm_modem_fops;
+
+	memset((void *)&mdev->mdm_panic_blk, 0,
+		   sizeof(struct notifier_block));
+	mdev->mdm_panic_blk.notifier_call  = mdm_panic_prep;
+	atomic_notifier_chain_register(&panic_notifier_list,
+				   &mdev->mdm_panic_blk);
+
+	/* MDM2AP_ERRFATAL */
 	pres = platform_get_resource_byname(pdev, IORESOURCE_IO,
 							"MDM2AP_ERRFATAL");
-	if (pres)
-		mdm_drv->mdm2ap_errfatal_gpio = pres->start;
+	mdm_drv->mdm2ap_errfatal_gpio = pres ? pres->start : -1;
 
-	
+	/* AP2MDM_ERRFATAL */
 	pres = platform_get_resource_byname(pdev, IORESOURCE_IO,
 							"AP2MDM_ERRFATAL");
-	if (pres)
-		mdm_drv->ap2mdm_errfatal_gpio = pres->start;
+	mdm_drv->ap2mdm_errfatal_gpio = pres ? pres->start : -1;
 
-	
+	/* MDM2AP_STATUS */
 	pres = platform_get_resource_byname(pdev, IORESOURCE_IO,
 							"MDM2AP_STATUS");
-	if (pres)
-		mdm_drv->mdm2ap_status_gpio = pres->start;
+	mdm_drv->mdm2ap_status_gpio = pres ? pres->start : -1;
 
-	
+	/* AP2MDM_STATUS */
 	pres = platform_get_resource_byname(pdev, IORESOURCE_IO,
 							"AP2MDM_STATUS");
-	if (pres)
-		mdm_drv->ap2mdm_status_gpio = pres->start;
+	mdm_drv->ap2mdm_status_gpio = pres ? pres->start : -1;
 
-	
+	/* MDM2AP_WAKEUP */
 	pres = platform_get_resource_byname(pdev, IORESOURCE_IO,
 							"MDM2AP_WAKEUP");
-	if (pres)
-		mdm_drv->mdm2ap_wakeup_gpio = pres->start;
+	mdm_drv->mdm2ap_wakeup_gpio = pres ? pres->start : -1;
 
-	
+	/* AP2MDM_WAKEUP */
 	pres = platform_get_resource_byname(pdev, IORESOURCE_IO,
 							"AP2MDM_WAKEUP");
-	if (pres)
-		mdm_drv->ap2mdm_wakeup_gpio = pres->start;
+	mdm_drv->ap2mdm_wakeup_gpio = pres ? pres->start : -1;
 
-	
+	/* AP2MDM_SOFT_RESET */
 	pres = platform_get_resource_byname(pdev, IORESOURCE_IO,
-							"AP2MDM_PMIC_RESET_N");
-	if (pres)
-		mdm_drv->ap2mdm_pmic_reset_n_gpio = pres->start;
+							"AP2MDM_SOFT_RESET");
+	mdm_drv->ap2mdm_soft_reset_gpio = pres ? pres->start : -1;
 
-	
+	/* AP2MDM_KPDPWR_N */
 	pres = platform_get_resource_byname(pdev, IORESOURCE_IO,
 							"AP2MDM_KPDPWR_N");
-	if (pres)
-		mdm_drv->ap2mdm_kpdpwr_n_gpio = pres->start;
+	mdm_drv->ap2mdm_kpdpwr_n_gpio = pres ? pres->start : -1;
 
-	
+	/* AP2MDM_PMIC_PWR_EN */
 	pres = platform_get_resource_byname(pdev, IORESOURCE_IO,
-							"MDM2AP_HSIC_READY");
-	if (pres)
-		mdm_drv->mdm2ap_hsic_ready_gpio = pres->start;
+							"AP2MDM_PMIC_PWR_EN");
+	mdm_drv->ap2mdm_pmic_pwr_en_gpio = pres ? pres->start : -1;
 
-	
-	
+	/* MDM2AP_PBLRDY */
 	pres = platform_get_resource_byname(pdev, IORESOURCE_IO,
-							"AP2MDM_IPC1");
-	if (pres)
-		mdm_drv->ap2mdm_ipc1_gpio = pres->start;
+							"MDM2AP_PBLRDY");
+	mdm_drv->mdm2ap_pblrdy = pres ? pres->start : -1;
 
-	
+	/*USB_SW*/
 	pres = platform_get_resource_byname(pdev, IORESOURCE_IO,
-							"MDM2AP_BOOTLOADER");
-	if (pres)
-		mdm_drv->mdm2ap_bootloader_gpio = pres->start;
+							"USB_SW");
+	mdm_drv->usb_switch_gpio = pres ? pres->start : -1;
 
-#ifdef CONFIG_HTC_STORE_MODEM_RESET_INFO
-	modem_silent_reset_info_sysfs_attrs(pdev);
-#endif
-
-	
 	mdm_drv->boot_type                  = CHARM_NORMAL_BOOT;
 
-	mdm_drv->ops      = mdm_ops;
-	mdm_drv->pdata    = pdev->dev.platform_data;
+	mdev->dump_timeout_ms = mdm_drv->pdata->ramdump_timeout_ms > 0 ?
+		mdm_drv->pdata->ramdump_timeout_ms : MDM_RDUMP_TIMEOUT;
+
+	init_completion(&mdev->mdm_needs_reload);
+	init_completion(&mdev->mdm_boot);
+	init_completion(&mdev->mdm_ram_dumps);
+
+	mdev->first_boot = 1;
+	mutex_init(&mdm_drv->peripheral_status_lock);
 }
 
-extern void register_ap2mdm_pmic_reset_n_gpio(unsigned);	
-int mdm_common_create(struct platform_device  *pdev,
-					  struct mdm_ops *p_mdm_cb)
+static void mdm_deconfigure_ipc(struct mdm_device *mdev)
 {
+	struct mdm_modem_drv *mdm_drv = &mdev->mdm_data;
+
+	gpio_free(mdm_drv->ap2mdm_status_gpio);
+	gpio_free(mdm_drv->ap2mdm_errfatal_gpio);
+	if (GPIO_IS_VALID(mdm_drv->ap2mdm_kpdpwr_n_gpio))
+		gpio_free(mdm_drv->ap2mdm_kpdpwr_n_gpio);
+	if (GPIO_IS_VALID(mdm_drv->ap2mdm_pmic_pwr_en_gpio))
+		gpio_free(mdm_drv->ap2mdm_pmic_pwr_en_gpio);
+	gpio_free(mdm_drv->mdm2ap_status_gpio);
+	gpio_free(mdm_drv->mdm2ap_errfatal_gpio);
+	if (GPIO_IS_VALID(mdm_drv->ap2mdm_soft_reset_gpio))
+		gpio_free(mdm_drv->ap2mdm_soft_reset_gpio);
+
+	if (GPIO_IS_VALID(mdm_drv->ap2mdm_wakeup_gpio))
+		gpio_free(mdm_drv->ap2mdm_wakeup_gpio);
+
+	if (mdev->mdm_queue) {
+		destroy_workqueue(mdev->mdm_queue);
+		mdev->mdm_queue = NULL;
+	}
+	if (mdev->mdm_sfr_queue) {
+		destroy_workqueue(mdev->mdm_sfr_queue);
+		mdev->mdm_sfr_queue = NULL;
+	}
+}
+
+static int mdm_configure_ipc(struct mdm_device *mdev)
+{
+	struct mdm_modem_drv *mdm_drv = &mdev->mdm_data;
 	int ret = -1, irq;
-
-#ifdef CONFIG_HTC_POWEROFF_MODEM_IN_OFFMODE_CHARGING
-	
-	int mfg_mode = BOARD_MFG_MODE_NORMAL;
-	
-	mfg_mode = board_mfg_mode();
-	if ( mfg_mode == BOARD_MFG_MODE_OFFMODE_CHARGING ) {
-		unsigned ap2mdm_pmic_reset_n_gpio = 0;
-		struct resource *pres;
-		pr_info("%s: BOARD_MFG_MODE_OFFMODE_CHARGING\n", __func__);
-		pres = platform_get_resource_byname(pdev, IORESOURCE_IO, "AP2MDM_PMIC_RESET_N");
-		if (pres) {
-			ap2mdm_pmic_reset_n_gpio = pres->start;
-			
-			if ( ap2mdm_pmic_reset_n_gpio > 0 ) {
-				gpio_request(ap2mdm_pmic_reset_n_gpio, "AP2MDM_PMIC_RESET_N");
-				gpio_direction_output(ap2mdm_pmic_reset_n_gpio, 0);
-				pr_info("%s: Pull AP2MDM_PMIC_RESET_N(%d) to low\n", __func__, ap2mdm_pmic_reset_n_gpio);
-			}
-		} else {
-			pr_info("%s: pres=NULL\n", __func__);
-		}
-		return 0;
-	} else {
-		pr_info("%s: mfg_mode=[%d]\n", __func__, mfg_mode);
-	}
-	
-#else
-	pr_info("%s: CONFIG_HTC_POWEROFF_MODEM_IN_OFFMODE_CHARGING not set\n", __func__);
-#endif
-
-	mdm_drv = kzalloc(sizeof(struct mdm_modem_drv), GFP_KERNEL);
-	if (mdm_drv == NULL) {
-		pr_err("%s: kzalloc fail.\n", __func__);
-		goto alloc_err;
-	}
-
-	mdm_modem_initialize_data(pdev, p_mdm_cb);
-
-	if (mdm_drv->ops->debug_state_changed_cb)
-		mdm_drv->ops->debug_state_changed_cb(mdm_debug_on);
-
-	register_ap2mdm_pmic_reset_n_gpio(mdm_drv->ap2mdm_pmic_reset_n_gpio);	
 
 	gpio_request(mdm_drv->ap2mdm_status_gpio, "AP2MDM_STATUS");
 	gpio_request(mdm_drv->ap2mdm_errfatal_gpio, "AP2MDM_ERRFATAL");
-	
-	
-	
-	gpio_request(mdm_drv->ap2mdm_pmic_reset_n_gpio, "AP2MDM_PMIC_RESET_N");
+	if (GPIO_IS_VALID(mdm_drv->ap2mdm_kpdpwr_n_gpio))
+		gpio_request(mdm_drv->ap2mdm_kpdpwr_n_gpio, "AP2MDM_KPDPWR_N");
 	gpio_request(mdm_drv->mdm2ap_status_gpio, "MDM2AP_STATUS");
 	gpio_request(mdm_drv->mdm2ap_errfatal_gpio, "MDM2AP_ERRFATAL");
-	gpio_request(mdm_drv->mdm2ap_hsic_ready_gpio, "MDM2AP_HSIC_READY");
-	
-	gpio_request(mdm_drv->ap2mdm_ipc1_gpio, "AP2MDM_IPC1");
-#ifdef CONFIG_QSC_MODEM
-	gpio_request(mdm_drv->mdm2ap_bootloader_gpio, "MDM2AP_BOOTLOADER");
-#endif
-	
+	if (GPIO_IS_VALID(mdm_drv->mdm2ap_pblrdy))
+		gpio_request(mdm_drv->mdm2ap_pblrdy, "MDM2AP_PBLRDY");
 
-	if (mdm_drv->ap2mdm_wakeup_gpio > 0)
+	if (GPIO_IS_VALID(mdm_drv->ap2mdm_pmic_pwr_en_gpio))
+		gpio_request(mdm_drv->ap2mdm_pmic_pwr_en_gpio,
+					 "AP2MDM_PMIC_PWR_EN");
+	if (GPIO_IS_VALID(mdm_drv->ap2mdm_soft_reset_gpio))
+		gpio_request(mdm_drv->ap2mdm_soft_reset_gpio,
+					 "AP2MDM_SOFT_RESET");
+
+	if (GPIO_IS_VALID(mdm_drv->ap2mdm_wakeup_gpio))
 		gpio_request(mdm_drv->ap2mdm_wakeup_gpio, "AP2MDM_WAKEUP");
 
-#if 0
-	gpio_direction_output(mdm_drv->ap2mdm_status_gpio, 1);
-#endif
+	if (GPIO_IS_VALID(mdm_drv->usb_switch_gpio)) {
+		if (gpio_request(mdm_drv->usb_switch_gpio, "USB_SW")) {
+			pr_err("%s Failed to get usb switch gpio\n", __func__);
+			mdm_drv->usb_switch_gpio = -1;
+		}
+	}
+
+	gpio_direction_output(mdm_drv->ap2mdm_status_gpio, 0);
 	gpio_direction_output(mdm_drv->ap2mdm_errfatal_gpio, 0);
-	
-	gpio_direction_output(mdm_drv->ap2mdm_ipc1_gpio, 0);
 
-#ifdef CONFIG_QSC_MODEM
-	
-	gpio_tlmm_config(GPIO_CFG((mdm_drv->mdm2ap_bootloader_gpio),  0, GPIO_CFG_INPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA), GPIO_CFG_ENABLE);
-	gpio_direction_input(mdm_drv->mdm2ap_bootloader_gpio);  
-#endif
-	
-
-	if (mdm_drv->ap2mdm_wakeup_gpio > 0)
+	if (GPIO_IS_VALID(mdm_drv->ap2mdm_wakeup_gpio))
 		gpio_direction_output(mdm_drv->ap2mdm_wakeup_gpio, 0);
 
 	gpio_direction_input(mdm_drv->mdm2ap_status_gpio);
 	gpio_direction_input(mdm_drv->mdm2ap_errfatal_gpio);
 
-	mdm_queue = create_singlethread_workqueue("mdm_queue");
-	if (!mdm_queue) {
-		pr_err("%s: could not create workqueue. All mdm "
-				"functionality will be disabled\n",
-			__func__);
+	mdev->mdm_queue = alloc_workqueue("mdm_queue", 0, 0);
+	if (!mdev->mdm_queue) {
+		pr_err("%s: could not create mdm_queue for mdm id %d\n",
+			   __func__, mdev->mdm_data.device_id);
 		ret = -ENOMEM;
 		goto fatal_err;
 	}
 
-	mdm_sfr_queue = alloc_workqueue("mdm_sfr_queue", 0, 0);
-	if (!mdm_sfr_queue) {
-		pr_err("%s: could not create workqueue mdm_sfr_queue."
-			" All mdm functionality will be disabled\n",
-			__func__);
+	mdev->mdm_sfr_queue = alloc_workqueue("mdm_sfr_queue", 0, 0);
+	if (!mdev->mdm_sfr_queue) {
+		pr_err("%s: could not create mdm_sfr_queue for mdm id %d\n",
+			   __func__, mdev->mdm_data.device_id);
 		ret = -ENOMEM;
-		destroy_workqueue(mdm_queue);
 		goto fatal_err;
 	}
 
-	
-	mdm_gpio_monitor_queue = create_singlethread_workqueue("mdm_gpio_monitor_queue");
-	if (!mdm_gpio_monitor_queue) {
-		pr_err("%s: could not create workqueue for monitoring GPIO status \n",
-			__func__);
-		destroy_workqueue(mdm_gpio_monitor_queue);
+	/* Register subsystem handlers */
+	mdev->mdm_subsys_dev = subsys_register(&mdev->mdm_subsys);
+	if (IS_ERR(mdev->mdm_subsys_dev)) {
+		ret = PTR_ERR(mdev->mdm_subsys_dev);
+		goto fatal_err;
 	}
-	
+	memset((void *)&mdev->ssr_notifier_blk, 0,
+			sizeof(struct notifier_block));
+	mdev->ssr_notifier_blk.notifier_call  = ssr_notifier_cb;
+	subsys_notif_register_notifier(mdev->subsys_name,
+			&mdev->ssr_notifier_blk);
 
-	atomic_notifier_chain_register(&panic_notifier_list, &mdm_panic_blk);
-	mdm_debugfs_init();
-
-	mdm_loaded_info();	
-
-	
-	ssr_register_subsystem(&mdm_subsystem);
-
-	
+	/* ERR_FATAL irq. */
 	irq = MSM_GPIO_TO_INT(mdm_drv->mdm2ap_errfatal_gpio);
 	if (irq < 0) {
-		pr_err("%s: could not get MDM2AP_ERRFATAL IRQ resource. "
-			"error=%d No IRQ will be generated on errfatal.",
-			__func__, irq);
+		pr_err("%s: bad MDM2AP_ERRFATAL IRQ resource, err = %d\n",
+			   __func__, irq);
 		goto errfatal_err;
 	}
 	ret = request_irq(irq, mdm_errfatal,
-		IRQF_TRIGGER_RISING , "mdm errfatal", NULL);
+			IRQF_TRIGGER_RISING , "mdm errfatal", mdev);
 
 	if (ret < 0) {
-		pr_err("%s: MDM2AP_ERRFATAL IRQ#%d request failed with error=%d"
-			". No IRQ will be generated on errfatal.",
-			__func__, irq, ret);
+		pr_err("%s: MDM2AP_ERRFATAL IRQ#%d request failed, err=%d\n",
+					__func__, irq, ret);
 		goto errfatal_err;
 	}
-	mdm_drv->mdm_errfatal_irq = irq;
+	mdev->mdm_errfatal_irq = irq;
 
 errfatal_err:
 
-	
+	 /* status irq */
 	irq = MSM_GPIO_TO_INT(mdm_drv->mdm2ap_status_gpio);
 	if (irq < 0) {
-		pr_err("%s: could not get MDM2AP_STATUS IRQ resource. "
-			"error=%d No IRQ will be generated on status change.",
-			__func__, irq);
+		pr_err("%s: bad MDM2AP_STATUS IRQ resource, err = %d\n",
+				__func__, irq);
 		goto status_err;
 	}
 
 	ret = request_threaded_irq(irq, NULL, mdm_status_change,
 		IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING | IRQF_SHARED,
-		"mdm status", mdm_drv);
+		"mdm status", mdev);
 
 	if (ret < 0) {
-		pr_err("%s: MDM2AP_STATUS IRQ#%d request failed with error=%d"
-			". No IRQ will be generated on status change.",
-			__func__, irq, ret);
+		pr_err("%s: MDM2AP_STATUS IRQ#%d request failed, err=%d",
+			 __func__, irq, ret);
 		goto status_err;
 	}
-	mdm_drv->mdm_status_irq = irq;
+	mdev->mdm_status_irq = irq;
 
 status_err:
-	mdm_drv->ops->power_on_mdm_cb(mdm_drv);
+	if (GPIO_IS_VALID(mdm_drv->mdm2ap_pblrdy)) {
+		irq = MSM_GPIO_TO_INT(mdm_drv->mdm2ap_pblrdy);
+		if (irq < 0) {
+			pr_err("%s: could not get MDM2AP_PBLRDY IRQ resource\n",
+				 __func__);
+			goto pblrdy_err;
+		}
 
-#ifdef CONFIG_QSC_MODEM
-	
-	irq = MSM_GPIO_TO_INT(mdm_drv->mdm2ap_bootloader_gpio);
-	if (irq < 0) {
-		pr_err("%s: could not get mdm2ap_bootloader irq resource, error=%d. Skip waiting for MDM_BOOTLOADER interrupt.",
-			__func__, irq);
-	}
-	else
-	{
-		ret = request_threaded_irq(irq, NULL, mdm_in_bootloader, IRQF_TRIGGER_RISING, "mdm in bootloader", NULL);
+		ret = request_threaded_irq(irq, NULL, mdm_pblrdy_change,
+				IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING |
+				IRQF_SHARED,
+				"mdm pbl ready", mdev);
 
 		if (ret < 0) {
-			pr_err("%s: mdm2ap_bootloader irq request failed with error=%d. Skip waiting for MDM_BOOTLOADER interrupt.",
-				__func__, ret);
+			pr_err("%s: MDM2AP_PBL IRQ#%d request failed error=%d\n",
+				__func__, irq, ret);
+			goto pblrdy_err;
 		}
-		else
-		{
-			qsc_boot_after_mdm_bootloader(MDM_BOOTLOAER_GPIO_IRQ_REGISTERED);
-			mdm_drv->mdm2ap_bootloader_irq = irq;
-			pr_info("%s: Registered mdm2ap_bootloader irq, gpio<%d> irq<%d> ret<%d>\n"
-			, __func__, mdm_drv->mdm2ap_bootloader_gpio, irq, ret);
-		}
+		mdev->mdm_pblrdy_irq = irq;
 	}
-#endif
 
-	pr_info("%s: Registering mdm modem\n", __func__);
-	return misc_register(&mdm_modem_misc);
+pblrdy_err:
+	/*
+	 * If AP2MDM_PMIC_PWR_EN gpio is used, pull it high. It remains
+	 * high until the whole phone is shut down.
+	 */
+	if (GPIO_IS_VALID(mdm_drv->ap2mdm_pmic_pwr_en_gpio))
+		gpio_direction_output(mdm_drv->ap2mdm_pmic_pwr_en_gpio, 1);
+
+	return 0;
 
 fatal_err:
-	gpio_free(mdm_drv->ap2mdm_status_gpio);
-	gpio_free(mdm_drv->ap2mdm_errfatal_gpio);
-	gpio_free(mdm_drv->ap2mdm_kpdpwr_n_gpio);
-	gpio_free(mdm_drv->ap2mdm_pmic_reset_n_gpio);
-	gpio_free(mdm_drv->mdm2ap_status_gpio);
-	gpio_free(mdm_drv->mdm2ap_errfatal_gpio);
-	gpio_free(mdm_drv->mdm2ap_hsic_ready_gpio);
-	
-	gpio_free(mdm_drv->ap2mdm_ipc1_gpio);
-#ifdef CONFIG_QSC_MODEM
-	gpio_free(mdm_drv->mdm2ap_bootloader_gpio);
-#endif
-	
-
-	if (mdm_drv->ap2mdm_wakeup_gpio > 0)
-		gpio_free(mdm_drv->ap2mdm_wakeup_gpio);
-
-	kfree(mdm_drv);
-	ret = -ENODEV;
-
-alloc_err:
+	mdm_deconfigure_ipc(mdev);
 	return ret;
 }
 
-int mdm_common_modem_remove(struct platform_device *pdev)
+static int __devinit mdm_modem_probe(struct platform_device *pdev)
+{
+	struct mdm_device *mdev = NULL;
+	int ret = -1;
+
+	mdev = kzalloc(sizeof(struct mdm_device), GFP_KERNEL);
+	if (!mdev) {
+		pr_err("%s: kzalloc fail.\n", __func__);
+		ret = -ENOMEM;
+		goto init_err;
+	}
+
+	platform_set_drvdata(pdev, mdev);
+	mdm_modem_initialize_data(pdev, mdev);
+
+	if (mdm_ops->debug_state_changed_cb)
+		mdm_ops->debug_state_changed_cb(mdm_debug_mask);
+
+	if (mdm_configure_ipc(mdev)) {
+		pr_err("%s: mdm_configure_ipc failed, id = %d\n",
+			   __func__, mdev->mdm_data.device_id);
+		goto init_err;
+	}
+
+	pr_debug("%s: Registering mdm id %d\n", __func__,
+			mdev->mdm_data.device_id);
+	ret = misc_register(&mdev->misc_device);
+	if (ret) {
+		pr_err("%s: failed registering mdm id %d, ret = %d\n",
+			   __func__, mdev->mdm_data.device_id, ret);
+		mdm_deconfigure_ipc(mdev);
+		goto init_err;
+	} else {
+		pr_err("%s: registered mdm id %d\n",
+			   __func__, mdev->mdm_data.device_id);
+
+		mdm_device_list_add(mdev);
+		INIT_DELAYED_WORK(&mdev->mdm2ap_status_check_work,
+					mdm2ap_status_check);
+		INIT_WORK(&mdev->mdm_status_work, mdm_status_fn);
+		INIT_WORK(&mdev->sfr_reason_work, mdm_restart_reason_fn);
+
+		/* Perform early powerup of the external modem in order to
+		 * allow tabla devices to be found.
+		 */
+		if (mdev->mdm_data.pdata->early_power_on)
+			mdm_ops->power_on_mdm_cb(&mdev->mdm_data);
+	}
+
+	return ret;
+
+init_err:
+	kfree(mdev);
+	return ret;
+}
+
+static int __devexit mdm_modem_remove(struct platform_device *pdev)
 {
 	int ret;
-#ifdef CONFIG_HTC_POWEROFF_MODEM_IN_OFFMODE_CHARGING
-	
-	int mfg_mode = BOARD_MFG_MODE_NORMAL;
-	mfg_mode = board_mfg_mode();
-	if ( mfg_mode == BOARD_MFG_MODE_OFFMODE_CHARGING ) {
-		unsigned ap2mdm_pmic_reset_n_gpio = 0;
-		struct resource *pres;
-		pr_info("%s: BOARD_MFG_MODE_OFFMODE_CHARGING\n", __func__);
-		pres = platform_get_resource_byname(pdev, IORESOURCE_IO, "AP2MDM_PMIC_RESET_N");
-		if (pres) {
-			ap2mdm_pmic_reset_n_gpio = pres->start;
-			
-			if ( ap2mdm_pmic_reset_n_gpio > 0 ) {
-				gpio_free(ap2mdm_pmic_reset_n_gpio);
-				pr_info("%s: gpio_free AP2MDM_PMIC_RESET_N(%d)\n", __func__, ap2mdm_pmic_reset_n_gpio);
-			}
-		}
-		return 0;
-	}
-	
-#endif
-	gpio_free(mdm_drv->ap2mdm_status_gpio);
-	gpio_free(mdm_drv->ap2mdm_errfatal_gpio);
-	gpio_free(mdm_drv->ap2mdm_kpdpwr_n_gpio);
-	gpio_free(mdm_drv->ap2mdm_pmic_reset_n_gpio);
-	gpio_free(mdm_drv->mdm2ap_status_gpio);
-	gpio_free(mdm_drv->mdm2ap_errfatal_gpio);
-	gpio_free(mdm_drv->mdm2ap_hsic_ready_gpio);
-	
-	gpio_free(mdm_drv->ap2mdm_ipc1_gpio);
-#ifdef CONFIG_QSC_MODEM
-	gpio_free(mdm_drv->mdm2ap_bootloader_gpio);
-#endif
-	
+	struct mdm_device *mdev = platform_get_drvdata(pdev);
 
-	if (mdm_drv->ap2mdm_wakeup_gpio > 0)
-		gpio_free(mdm_drv->ap2mdm_wakeup_gpio);
-
-	kfree(mdm_drv);
-
-	ret = misc_deregister(&mdm_modem_misc);
+	pr_debug("%s: removing device id %d\n",
+			__func__, mdev->mdm_data.device_id);
+	mdm_deconfigure_ipc(mdev);
+	ret = misc_deregister(&mdev->misc_device);
+	mdm_device_list_remove(mdev);
+	kfree(mdev);
 	return ret;
 }
 
-void mdm_common_modem_shutdown(struct platform_device *pdev)
+static void mdm_modem_shutdown(struct platform_device *pdev)
 {
-#ifdef CONFIG_HTC_POWEROFF_MODEM_IN_OFFMODE_CHARGING
-	
-	int mfg_mode = BOARD_MFG_MODE_NORMAL;
-	mfg_mode = board_mfg_mode();
-	if ( mfg_mode == BOARD_MFG_MODE_OFFMODE_CHARGING ) {
-		pr_info("%s: BOARD_MFG_MODE_OFFMODE_CHARGING\n", __func__);
-		return;
-	}
-	
-#endif
+	struct mdm_modem_drv *mdm_drv;
+	struct mdm_device *mdev = platform_get_drvdata(pdev);
 
-	pr_info("%s: setting AP2MDM_STATUS low for a graceful restart\n",
-		__func__);
+	pr_debug("%s: shutting down device id %d\n",
+		 __func__, mdev->mdm_data.device_id);
 
-	mdm_disable_irqs();
-	
-	gpio_set_value(mdm_drv->ap2mdm_status_gpio, 0);
-	
-
-	mdm_drv->ops->power_down_mdm_cb(mdm_drv);
-
+	mdm_disable_irqs(mdev);
+	mdm_drv = &mdev->mdm_data;
+	mdm_ops->power_down_mdm_cb(mdm_drv);
+	if (GPIO_IS_VALID(mdm_drv->ap2mdm_pmic_pwr_en_gpio))
+		gpio_direction_output(mdm_drv->ap2mdm_pmic_pwr_en_gpio, 0);
 }
 
-int mdm_common_htc_get_mdm2ap_errfatal_level(void)
+static struct of_device_id mdm_match_table[] = {
+	{.compatible = "qcom,mdm2_modem,mdm2_modem.1"},
+	{},
+};
+
+static struct platform_driver mdm_modem_driver = {
+	.probe    = mdm_modem_probe,
+	.remove   = __devexit_p(mdm_modem_remove),
+	.shutdown = mdm_modem_shutdown,
+	.driver         = {
+		.name = "mdm2_modem",
+		.owner = THIS_MODULE,
+		.of_match_table = mdm_match_table,
+	},
+};
+
+static int __init mdm_modem_init(void)
 {
-	int value = 0;
+	int ret;
 
-	if (mdm_drv != NULL && mdm_drv->mdm2ap_errfatal_gpio != 0)
-		value = gpio_get_value(mdm_drv->mdm2ap_errfatal_gpio);
+	ret = mdm_get_ops(&mdm_ops);
+	if (ret)
+		return ret;
 
-	pr_info("%s: %d\n", __func__, value);
-
-	return value;
+	INIT_LIST_HEAD(&mdm_devices);
+	mdm_debugfs_init();
+	return platform_driver_register(&mdm_modem_driver);
 }
-EXPORT_SYMBOL_GPL(mdm_common_htc_get_mdm2ap_errfatal_level);
 
-int mdm_common_htc_get_mdm2ap_status_level(void)
+static void __exit mdm_modem_exit(void)
 {
-	int value = 0;
-
-	if (mdm_drv != NULL && mdm_drv->mdm2ap_status_gpio != 0)
-		value = gpio_get_value(mdm_drv->mdm2ap_status_gpio);
-
-	pr_info("%s: %d\n", __func__, value);
-
-	return value;
+	platform_driver_unregister(&mdm_modem_driver);
 }
-EXPORT_SYMBOL_GPL(mdm_common_htc_get_mdm2ap_status_level);
 
+module_init(mdm_modem_init);
+module_exit(mdm_modem_exit);
 
+MODULE_LICENSE("GPL v2");
+MODULE_DESCRIPTION("mdm modem driver");
+MODULE_VERSION("2.0");
+MODULE_ALIAS("mdm_modem");

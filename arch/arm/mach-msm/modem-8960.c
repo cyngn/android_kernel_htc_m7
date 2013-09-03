@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -27,26 +27,17 @@
 #include <mach/subsystem_restart.h>
 #include <mach/subsystem_notif.h>
 #include <mach/socinfo.h>
-#include <mach/restart.h>
 #include <mach/msm_smsm.h>
-#include <mach/board_htc.h>
 
 #include "smd_private.h"
 #include "modem_notifier.h"
 #include "ramdump.h"
 
-#define MODULE_NAME		"modem_8960"
-
 static int crash_shutdown;
-#if defined (CONFIG_MSM_MODEM_SSR_ENABLE)
-static int enable_modem_ssr = 1;
-#else
-static int enable_modem_ssr = 0;
-#endif
+
+static struct subsys_device *modem_8960_dev;
 
 #define MAX_SSR_REASON_LEN 81U
-#define Q6_FW_WDOG_ENABLE		0x08882024
-#define Q6_SW_WDOG_ENABLE		0x08982024
 
 static void log_modem_sfr(void)
 {
@@ -75,32 +66,33 @@ static void log_modem_sfr(void)
 static void restart_modem(void)
 {
 	log_modem_sfr();
-	subsystem_restart("modem");
+	subsystem_restart_dev(modem_8960_dev);
 }
 
 static void smsm_state_cb(void *data, uint32_t old_state, uint32_t new_state)
 {
-	
+	/* Ignore if we're the one that set SMSM_RESET */
 	if (crash_shutdown)
 		return;
 
 	if (new_state & SMSM_RESET) {
 		pr_err("Probable fatal error on the modem.\n");
-		if (smd_smsm_erase_efs()) {
-			pr_err("Unrecoverable efs, need to reboot and erase"
-					"modem_st1/st2 partitions...\n");
-			msm_restart(RESTART_MODE_ERASE_EFS, "force-hard");
-		} else {
-			restart_modem();
-		}
+		restart_modem();
 	}
 }
 
-static int modem_shutdown(const struct subsys_data *subsys)
+#define Q6_FW_WDOG_ENABLE		0x08882024
+#define Q6_SW_WDOG_ENABLE		0x08982024
+
+static int modem_shutdown(const struct subsys_desc *subsys)
 {
 	void __iomem *q6_fw_wdog_addr;
 	void __iomem *q6_sw_wdog_addr;
 
+	/*
+	 * Disable the modem watchdog since it keeps running even after the
+	 * modem is shutdown.
+	 */
 	q6_fw_wdog_addr = ioremap_nocache(Q6_FW_WDOG_ENABLE, 4);
 	if (!q6_fw_wdog_addr)
 		return -ENOMEM;
@@ -127,7 +119,7 @@ static int modem_shutdown(const struct subsys_data *subsys)
 
 #define MODEM_WDOG_CHECK_TIMEOUT_MS 10000
 
-static int modem_powerup(const struct subsys_data *subsys)
+static int modem_powerup(const struct subsys_desc *subsys)
 {
 	pil_force_boot("modem_fw");
 	pil_force_boot("modem");
@@ -136,12 +128,13 @@ static int modem_powerup(const struct subsys_data *subsys)
 	return 0;
 }
 
-void modem_crash_shutdown(const struct subsys_data *subsys)
+void modem_crash_shutdown(const struct subsys_desc *subsys)
 {
 	crash_shutdown = 1;
 	smsm_reset_modem(SMSM_RESET);
 }
 
+/* FIXME: Get address, size from PIL */
 static struct ramdump_segment modemsw_segments[] = {
 	{0x89000000, 0x8D400000 - 0x89000000},
 };
@@ -158,12 +151,11 @@ static void *modemfw_ramdump_dev;
 static void *modemsw_ramdump_dev;
 static void *smem_ramdump_dev;
 
-static int modem_ramdump(int enable,
-				const struct subsys_data *crashed_subsys)
+static int modem_ramdump(int enable, const struct subsys_desc *crashed_subsys)
 {
 	int ret = 0;
 
-	if (enable&&(get_radio_flag()&0x8)) {
+	if (enable) {
 		ret = do_ramdump(modemsw_ramdump_dev, modemsw_segments,
 			ARRAY_SIZE(modemsw_segments));
 
@@ -201,16 +193,10 @@ static irqreturn_t modem_wdog_bite_irq(int irq, void *dev_id)
 
 	case Q6SW_WDOG_EXPIRED_IRQ:
 		pr_err("Watchdog bite received from modem software!\n");
-		if (get_restart_level() == RESET_SOC)
-			ssr_set_restart_reason(
-					"modem fatal: Modem SW Watchdog Bite!");
 		restart_modem();
 		break;
 	case Q6FW_WDOG_EXPIRED_IRQ:
 		pr_err("Watchdog bite received from modem firmware!\n");
-		if (get_restart_level() == RESET_SOC)
-			ssr_set_restart_reason(
-					"modem fatal: Modem FW Watchdog Bite!");
 		restart_modem();
 		break;
 	break;
@@ -222,46 +208,26 @@ static irqreturn_t modem_wdog_bite_irq(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static struct subsys_data modem_8960 = {
+static struct subsys_desc modem_8960 = {
 	.name = "modem",
 	.shutdown = modem_shutdown,
 	.powerup = modem_powerup,
 	.ramdump = modem_ramdump,
-	.crash_shutdown = modem_crash_shutdown,
-	.enable_ssr = 0
+	.crash_shutdown = modem_crash_shutdown
 };
-
-static int enable_modem_ssr_set(const char *val, struct kernel_param *kp)
-{
-	int ret;
-
-	ret = param_set_int(val, kp);
-	if (ret)
-		return ret;
-
-	if (enable_modem_ssr)
-		pr_info(MODULE_NAME ": Subsystem restart activated for Modem.\n");
-
-	modem_8960.enable_ssr = enable_modem_ssr;
-
-	return 0;
-}
-
-module_param_call(enable_modem_ssr, enable_modem_ssr_set, param_get_int,
-		&enable_modem_ssr, S_IRUGO | S_IWUSR);
-
 
 static int modem_subsystem_restart_init(void)
 {
-	modem_8960.enable_ssr = enable_modem_ssr;
-
-	return ssr_register_subsystem(&modem_8960);
+	modem_8960_dev = subsys_register(&modem_8960);
+	if (IS_ERR(modem_8960_dev))
+		return PTR_ERR(modem_8960_dev);
+	return 0;
 }
 
 static int modem_debug_set(void *data, u64 val)
 {
 	if (val == 1)
-		subsystem_restart("modem");
+		subsystem_restart_dev(modem_8960_dev);
 
 	return 0;
 }
@@ -292,8 +258,7 @@ static int __init modem_8960_init(void)
 {
 	int ret;
 
-	if (!cpu_is_msm8960() && !cpu_is_msm8930() && !cpu_is_msm8930aa() &&
-	    !cpu_is_msm9615() && !cpu_is_msm8627())
+	if (soc_class_is_apq8064())
 		return -ENODEV;
 
 	ret = smsm_state_cb_register(SMSM_MODEM_STATE, SMSM_RESET,
@@ -321,17 +286,6 @@ static int __init modem_8960_init(void)
 		disable_irq_nosync(Q6FW_WDOG_EXPIRED_IRQ);
 		goto out;
 	}
-
-
-	if (get_kernel_flag() & KERNEL_FLAG_ENABLE_SSR_MODEM) {
-	#ifdef CONFIG_MSM_MODEM_SSR_ENABLE
-		enable_modem_ssr = 0;
-	#else
-                enable_modem_ssr = 1;
-	#endif
-	}
-
-	pr_info("%s: enable_modem_ssr set to %d\n", __func__, enable_modem_ssr);
 
 	ret = modem_subsystem_restart_init();
 
