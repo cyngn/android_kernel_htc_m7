@@ -2961,6 +2961,21 @@ static int msm_pcm_routing_close(struct snd_pcm_substream *substream)
 	return 0;
 }
 
+int msm_pcm_routing_get_port(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	unsigned int be_id = rtd->dai_link->be_id;
+	struct msm_pcm_routing_bdai_data *bedai;
+
+	if (be_id >= MSM_BACKEND_DAI_MAX) {
+		pr_err("%s: unexpected be_id %d\n", __func__, be_id);
+		return -EINVAL;
+	}
+
+	bedai = &msm_bedais[be_id];
+	return bedai->port_id;
+}
+
 static int msm_pcm_routing_prepare(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;

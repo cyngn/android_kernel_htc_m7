@@ -25,6 +25,8 @@
 #include <sound/pcm.h>
 #include <sound/initval.h>
 #include <sound/control.h>
+#include <sound/q6adm.h>
+#include <sound/q6afe.h>
 #include <sound/q6asm.h>
 #include <sound/pcm_params.h>
 #include <asm/dma.h>

@@ -3375,6 +3375,63 @@ fail_cmd:
 	return rc;
 }
 
+int q6asm_enable_effect(struct audio_client *ac, uint32_t module_id,
+			uint32_t param_id, uint32_t payload_size,
+			void *payload)
+{
+	void *q6_cmd = NULL;
+	void *data = NULL;
+	struct asm_pp_params_command *cmd = NULL;
+	int sz = 0;
+	int rc  = 0;
+
+	pr_info("%s: param_id 0x%x, payload size %d\n",
+			__func__, param_id, payload_size);
+	sz = sizeof(struct asm_pp_params_command) +
+		+ payload_size;
+	q6_cmd = kzalloc(sz, GFP_KERNEL);
+	if (q6_cmd == NULL) {
+		pr_err("%s[%d]: Mem alloc failed\n", __func__, ac->session);
+		rc = -EINVAL;
+		return rc;
+	}
+	cmd = (struct asm_pp_params_command *)q6_cmd;
+	q6asm_add_hdr_async(ac, &cmd->hdr, sz, TRUE);
+	cmd->hdr.opcode = ASM_STREAM_CMD_SET_PP_PARAMS;
+	cmd->payload = NULL;
+	cmd->payload_size = sizeof(struct  asm_pp_param_data_hdr) +
+				payload_size;
+	cmd->params.module_id = module_id;
+	cmd->params.param_id = param_id;
+	cmd->params.param_size = payload_size;
+	cmd->params.reserved = 0;
+
+	data = (u8 *)(q6_cmd + sizeof(struct asm_pp_params_command));
+	memcpy(data, payload, payload_size);
+
+	rc = apr_send_pkt(ac->apr, (uint32_t *) q6_cmd);
+	if (rc < 0) {
+		pr_err("%s: Enable Q6 effect Command failed\n", __func__);
+		rc = -EINVAL;
+		goto fail_cmd;
+	}
+
+	rc = wait_event_timeout(ac->cmd_wait,
+			(atomic_read(&ac->cmd_state) == 0), 5*HZ);
+	if (!rc) {
+		pr_err("%s: timeout in sending command to apr\n",
+			__func__);
+		rc = -EINVAL;
+		goto fail_cmd;
+	}
+	rc = 0;
+
+fail_cmd:
+	kfree(q6_cmd);
+	pr_info("%s: return %d\n", __func__, rc);
+	return rc;
+}
+
 int q6asm_set_volume(struct audio_client *ac, int volume)
 {
 	void *vol_cmd = NULL;

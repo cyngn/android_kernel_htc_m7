@@ -346,6 +346,72 @@ static int32_t adm_callback(struct apr_client_data *data, void *priv)
 	return 0;
 }
 
+int q6adm_enable_effect(int port_id, uint32_t module_id, uint32_t param_id,
+        uint32_t payload_size, void *payload)
+{
+    void *q6_cmd = NULL;
+    void *data = NULL;
+    struct asm_pp_params_command *cmd = NULL;
+    int ret = 0, sz = 0;
+
+    pr_info("%s: param_id 0x%x, payload size %d\n",
+            __func__, param_id, payload_size);
+    sz = sizeof(struct asm_pp_params_command) + payload_size;
+    q6_cmd = kzalloc(sz, GFP_KERNEL);
+    if (q6_cmd == NULL) {
+        pr_err("%s[%d]: Mem alloc failed\n",
+               __func__, port_id);
+        return -ENOMEM;
+    }
+
+    cmd = (struct asm_pp_params_command *)q6_cmd;
+    cmd->payload = NULL;
+    cmd->payload_size = sizeof(struct asm_pp_param_data_hdr) + payload_size;
+
+    cmd->params.module_id = module_id;
+    cmd->params.param_id = param_id;
+    cmd->params.param_size = payload_size;
+    cmd->params.reserved = 0;
+
+    cmd->hdr.hdr_field = APR_HDR_FIELD(APR_MSG_TYPE_SEQ_CMD,
+                APR_HDR_LEN(APR_HDR_SIZE), APR_PKT_VER);
+    cmd->hdr.pkt_size = sz;
+    cmd->hdr.src_svc = APR_SVC_ADM;
+    cmd->hdr.src_domain = APR_DOMAIN_APPS;
+    cmd->hdr.src_port = port_id;
+    cmd->hdr.dest_svc = APR_SVC_ADM;
+    cmd->hdr.dest_domain = APR_DOMAIN_ADSP;
+    cmd->hdr.dest_port = atomic_read(&this_adm.copp_id[port_id]);
+    cmd->hdr.token = port_id;
+    cmd->hdr.opcode = ADM_CMD_SET_PARAMS;
+
+    data = (u8 *)(q6_cmd + sizeof(struct asm_pp_params_command));
+    memcpy(data, payload, payload_size);
+
+    ret = apr_send_pkt(this_adm.apr, (uint32_t *)q6_cmd);
+    if (ret < 0) {
+        pr_err("%s: ADM enable for port %d failed\n",
+            __func__, port_id);
+        ret = -EINVAL;
+        goto fail_cmd;
+    }
+    ret = wait_event_timeout(this_adm.wait,
+        atomic_read(&this_adm.copp_stat[port_id]),
+        msecs_to_jiffies(TIMEOUT_MS));
+    if (!ret) {
+        pr_err("%s: ADM open failed for port %d\n",
+            __func__, port_id);
+        ret = -EINVAL;
+        goto fail_cmd;
+    }
+    ret = 0;
+
+fail_cmd:
+    kfree(q6_cmd);
+    pr_info("%s: return %d\n", __func__, ret);
+    return ret;
+}
+
 static int send_adm_cal_block(int port_id, struct acdb_cal_block *aud_cal)
 {
 	s32				result = 0;
