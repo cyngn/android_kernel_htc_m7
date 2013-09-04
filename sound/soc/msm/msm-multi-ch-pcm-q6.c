@@ -277,7 +277,7 @@ static int msm_pcm_playback_prepare(struct snd_pcm_substream *substream)
 
 	ret = q6asm_media_format_block_multi_ch_pcm_format_support(
 			prtd->audio_client, runtime->rate, runtime->channels,
-			prtd->channel_map, bit_width);
+			bit_width);
 
 	if (ret < 0)
 		pr_info("%s: CMD Format block failed\n", __func__);

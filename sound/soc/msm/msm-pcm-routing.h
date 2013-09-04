@@ -114,6 +114,11 @@ enum msm_pcm_routing_event {
 	MSM_PCM_RT_EVT_DEVSWITCH,
 	MSM_PCM_RT_EVT_MAX,
 };
+
+struct msm_pcm_routing_ops {
+    int (*get_q6_effect) (void);
+};
+
 /* dai_id: front-end ID,
  * dspst_id:  DSP audio stream ID
  * stream_type: playback or capture
@@ -142,4 +147,5 @@ int multi_ch_pcm_set_volume(unsigned volume);
 
 int compressed_set_volume(unsigned volume);
 
+void htc_register_pcm_routing_ops(struct msm_pcm_routing_ops *ops);
 #endif /*_MSM_PCM_H*/

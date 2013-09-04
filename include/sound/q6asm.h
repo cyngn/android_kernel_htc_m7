@@ -304,7 +304,7 @@ int q6asm_media_format_block_multi_ch_pcm(struct audio_client *ac,
 
 int q6asm_media_format_block_multi_ch_pcm_format_support(
 		struct audio_client *ac, uint32_t rate, uint32_t channels,
-		char *channel_map, uint16_t bit_width);
+		uint16_t bit_width);
 
 int q6asm_media_format_block_aac(struct audio_client *ac,
 			struct asm_aac_cfg *cfg);

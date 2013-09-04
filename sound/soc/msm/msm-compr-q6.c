@@ -33,6 +33,8 @@
 #include <sound/timer.h>
 #include <sound/pcm.h>
 
+#define Q6_EFFECT_DEBUG 0
+
 #include "msm-compr-q6.h"
 #include "msm-pcm-routing.h"
 
@@ -104,6 +106,14 @@ static struct snd_pcm_hw_constraint_list constraints_sample_rates = {
 	.list = supported_sample_rates,
 	.mask = 0,
 };
+
+static struct msm_compr_q6_ops default_cops;
+static struct msm_compr_q6_ops *cops = &default_cops;
+
+void htc_register_compr_q6_ops(struct msm_compr_q6_ops *ops)
+{
+    cops = ops;
+}
 
 static void compr_event_handler(uint32_t opcode,
 		uint32_t token, uint32_t *payload, void *priv)
@@ -927,6 +937,15 @@ static int msm_compr_hw_params(struct snd_pcm_substream *substream,
 	if (params_format(params) == SNDRV_PCM_FORMAT_S24_LE)
 		bit_width = 24;
 
+	if (cops->get_24b_audio) {
+		if (cops->get_24b_audio() == 1) {
+			pr_info("%s: enable 24 bit Audio in POPP\n",
+					__func__);
+			bit_width = 24;
+		}
+	}
+
+
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
 		switch (compr->info.codec_param.codec.id) {
 		case SND_AUDIOCODEC_AC3_PASS_THROUGH:
@@ -1200,6 +1219,94 @@ static int msm_compr_ioctl(struct snd_pcm_substream *substream,
 
 		prtd->cmd_interrupt = 0;
 		return rc;
+
+	case SNDRV_PCM_IOCTL1_ENABLE_EFFECT:
+	{
+		struct param {
+			uint32_t effect_type;
+			uint32_t module_id;
+			uint32_t param_id;
+			uint32_t payload_size;
+		} q6_param;
+		void *payload;
+
+		pr_info("[%p] %s: SNDRV_PCM_IOCTL1_ENABLE_EFFECT\n", prtd, __func__);
+		if (copy_from_user(&q6_param, (void *) arg,
+					sizeof(q6_param))) {
+			pr_err("[%p] %s: copy param from user failed\n",
+				prtd, __func__);
+			return -EFAULT;
+		}
+
+		if (q6_param.payload_size <= 0 ||
+			(q6_param.effect_type != 0 &&
+			 q6_param.effect_type != 1)) {
+			pr_err("[%p] %s: unsupported param: %d, 0x%x, 0x%x, %d\n",
+				prtd, __func__, q6_param.effect_type,
+				q6_param.module_id, q6_param.param_id,
+				q6_param.payload_size);
+			return -EINVAL;
+		}
+
+		payload = kzalloc(q6_param.payload_size, GFP_KERNEL);
+		if (!payload) {
+			pr_err("[%p] %s: failed to allocate memory\n",
+				prtd, __func__);
+			return -ENOMEM;
+		}
+		if (copy_from_user(payload, (void *) (arg + sizeof(q6_param)),
+			q6_param.payload_size)) {
+			pr_err("[%p] %s: copy payload from user failed\n",
+				prtd, __func__);
+			kfree(payload);
+			return -EFAULT;
+		}
+
+		if (q6_param.effect_type == 0) {
+			if (!prtd->audio_client) {
+				pr_debug("%s: audio_client not found\n",
+					__func__);
+				kfree(payload);
+				return -EACCES;
+			}
+			rc = q6asm_enable_effect(prtd->audio_client,
+						q6_param.module_id,
+						q6_param.param_id,
+						q6_param.payload_size,
+						payload);
+			pr_info("[%p] %s: call q6asm_enable_effect, rc %d\n",
+				prtd, __func__, rc);
+		} else {
+			int port_id = msm_pcm_routing_get_port(substream);
+			int index = afe_get_port_index(port_id);
+			pr_info("[%p] %s: use copp topology, port id %d, index %d\n",
+				prtd, __func__, port_id, index);
+			if (port_id < 0) {
+				pr_err("[%p] %s: invalid port_id %d\n",
+					prtd, __func__, port_id);
+			} else {
+				rc = q6adm_enable_effect(index,
+							 q6_param.module_id,
+							 q6_param.param_id,
+							 q6_param.payload_size,
+							 payload);
+				pr_info("[%p] %s: call q6adm_enable_effect, rc %d\n",
+					prtd, __func__, rc);
+			}
+		}
+#if Q6_EFFECT_DEBUG
+		{
+			int *ptr;
+			int i;
+			ptr = (int *)payload;
+			for (i = 0; i < (q6_param.payload_size / 4); i++)
+				pr_aud_info("[%p] 0x%08x", prtd, *(ptr + i));
+		}
+#endif
+		kfree(payload);
+		return rc;
+	}
+
 	default:
 		break;
 	}

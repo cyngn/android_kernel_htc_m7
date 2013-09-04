@@ -1656,6 +1656,15 @@ int q6asm_open_write_v2(struct audio_client *ac, uint32_t format,
 	if (open.post_proc_top == 0)
 		open.post_proc_top = DEFAULT_POPP_TOPOLOGY;
 
+	if (qops->get_q6_effect) {
+		int mode = qops->get_q6_effect();
+		if (mode == 0) {
+			pr_info("%s:change to HTC_POPP_TOPOLOGY\n",
+					__func__);
+			open.post_proc_top = HTC_POPP_TOPOLOGY;
+		}
+	}
+
 	switch (format) {
 	case FORMAT_LINEAR_PCM:
 		open.format = LINEAR_PCM;
@@ -2567,8 +2576,7 @@ fail_cmd:
 
 int q6asm_media_format_block_multi_ch_pcm_format_support(
 			struct audio_client *ac, uint32_t rate,
-			uint32_t channels, char *channel_map,
-			uint16_t bit_width)
+			uint32_t channels, uint16_t bit_width)
 {
 	struct asm_stream_media_format_update fmt;
 	u8 *channel_mapping;
@@ -2590,7 +2598,26 @@ int q6asm_media_format_block_multi_ch_pcm_format_support(
 	fmt.write_cfg.multi_ch_pcm_cfg.is_interleaved = 1;
 	channel_mapping =
 		fmt.write_cfg.multi_ch_pcm_cfg.channel_mapping;
-	memcpy(channel_mapping, channel_map, PCM_FORMAT_MAX_NUM_CHANNEL);
+
+	memset(channel_mapping, 0, PCM_FORMAT_MAX_NUM_CHANNEL);
+
+	if (channels == 1)  {
+		channel_mapping[0] = PCM_CHANNEL_FL;
+	} else if (channels == 2) {
+		channel_mapping[0] = PCM_CHANNEL_FL;
+		channel_mapping[1] = PCM_CHANNEL_FR;
+	} else if (channels == 6) {
+		channel_mapping[0] = PCM_CHANNEL_FC;
+		channel_mapping[1] = PCM_CHANNEL_FL;
+		channel_mapping[2] = PCM_CHANNEL_FR;
+		channel_mapping[3] = PCM_CHANNEL_LB;
+		channel_mapping[4] = PCM_CHANNEL_RB;
+		channel_mapping[5] = PCM_CHANNEL_LFE;
+	} else {
+		pr_err("%s: ERROR.unsupported num_ch = %u\n", __func__,
+				channels);
+		return -EINVAL;
+	}
 
 	rc = apr_send_pkt(ac->apr, (uint32_t *) &fmt);
 	if (rc < 0) {

@@ -233,6 +233,14 @@ static struct msm_pcm_routing_fdai_data
 	{0, INVALID_SESSION, {NULL, NULL} } },
 };
 
+static struct msm_pcm_routing_ops default_rops;
+static struct msm_pcm_routing_ops *rops = &default_rops;
+
+void htc_register_pcm_routing_ops(struct msm_pcm_routing_ops *ops)
+{
+	rops = ops;
+}
+
 static uint8_t is_be_dai_extproc(int be_dai)
 {
 	if (be_dai == MSM_BACKEND_DAI_EXTPROC_RX ||
@@ -318,6 +326,7 @@ void msm_pcm_routing_reg_phy_stream(int fedai_id, bool perf_mode, int dspst_id,
 	struct route_payload payload;
 	u32 channels;
 	u16 bit_width = 16;
+	int topology = DEFAULT_COPP_TOPOLOGY;
 
 	if (fedai_id > MSM_FRONTEND_DAI_MM_MAX_ID) {
 		/* bad ID assigned in machine driver */
@@ -336,6 +345,14 @@ void msm_pcm_routing_reg_phy_stream(int fedai_id, bool perf_mode, int dspst_id,
 	}
 
 	mutex_lock(&routing_lock);
+
+	if (rops->get_q6_effect) {
+		if (rops->get_q6_effect() == 1) {
+			pr_info("%s: change to HTC_COPP_TOPOLOGY\n",
+					__func__);
+			topology = HTC_COPP_TOPOLOGY;
+		}
+	}
 
 	payload.num_copps = 0; /* only RX needs to use payload */
 	fe_dai_map[fedai_id][session_type].strm_id = dspst_id;
@@ -454,6 +471,7 @@ static void msm_pcm_routing_process_audio(u16 reg, u16 val, int set)
 	int session_type, path_type;
 	u32 channels;
 	struct msm_pcm_routing_fdai_data *fdai;
+	int topology = DEFAULT_COPP_TOPOLOGY;
 	u16 bit_width = 16;
 
 	pr_debug("%s: reg %x val %x set %x\n", __func__, reg, val, set);
@@ -476,6 +494,15 @@ static void msm_pcm_routing_process_audio(u16 reg, u16 val, int set)
 	mutex_lock(&routing_lock);
 
 	if (set) {
+
+		if (rops->get_q6_effect) {
+			if (rops->get_q6_effect() == 1) {
+				pr_info("%s: change to HTC_COPP_TOPOLOGY\n",
+						__func__);
+				topology = HTC_COPP_TOPOLOGY;
+			}
+		}
+
 		if (!test_bit(val, &msm_bedais[reg].fe_sessions) &&
 			(msm_bedais[reg].port_id == VOICE_PLAYBACK_TX))
 			voc_start_playback(set);
@@ -2943,6 +2970,7 @@ static int msm_pcm_routing_prepare(struct snd_pcm_substream *substream)
 	u32 channels;
 	bool playback, capture;
 	struct msm_pcm_routing_fdai_data *fdai;
+	int topology = DEFAULT_COPP_TOPOLOGY;
 	u16 bit_width = 16;
 
 	if (be_id >= MSM_BACKEND_DAI_MAX) {
@@ -2973,6 +3001,14 @@ static int msm_pcm_routing_prepare(struct snd_pcm_substream *substream)
 	bedai->active = 1;
 	playback = substream->stream == SNDRV_PCM_STREAM_PLAYBACK;
 	capture  = substream->stream == SNDRV_PCM_STREAM_CAPTURE;
+
+	if (rops->get_q6_effect) {
+		if (rops->get_q6_effect() == 1) {
+			pr_info("%s: change to HTC_COPP_TOPOLOGY\n",
+					__func__);
+			topology = HTC_COPP_TOPOLOGY;
+		}
+	}
 
 	for_each_set_bit(i, &bedai->fe_sessions, MSM_FRONTEND_DAI_MM_SIZE) {
 		fdai = &fe_dai_map[i][session_type];
