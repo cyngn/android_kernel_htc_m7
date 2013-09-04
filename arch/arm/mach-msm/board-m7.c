@@ -3705,8 +3705,8 @@ static struct mdm_platform_data mdm_platform_data = {
 	.peripheral_platform_device = &apq8064_device_hsic_host,
 	.ramdump_timeout_ms = 120000,
 	.mdm2ap_status_gpio_run_cfg = &mdm2ap_status_gpio_run_cfg,
-	.sysmon_subsys_id_valid = 1,
-	.sysmon_subsys_id = SYSMON_SS_EXT_MODEM,
+	//.sysmon_subsys_id_valid = 1,
+	//.sysmon_subsys_id = SYSMON_SS_EXT_MODEM,
 };
 
 static struct tsens_platform_data apq_tsens_pdata  = {
@@ -3725,12 +3725,9 @@ static struct platform_device msm_tsens_device = {
 static struct msm_thermal_data msm_thermal_pdata = {
 	.sensor_id = 7,
 	.poll_ms = 250,
-	.limit_temp_degC = 60,
-	.temp_hysteresis_degC = 10,
-	.freq_step = 2,
-	.core_limit_temp_degC = 80,
-	.core_temp_hysteresis_degC = 10,
-	.core_control_mask = 0xe,
+	.limit_temp = 60,
+	.temp_hysteresis = 10,
+	.limit_freq = 918000,
 };
 
 #define MSM_SHARED_RAM_PHYS 0x80000000
@@ -4180,7 +4177,15 @@ static struct platform_device m7_device_ext_mpp8_vreg __devinitdata = {
 	},
 };
 
-#if 0
+static struct platform_device m7_device_ext_3p3v_vreg __devinitdata = {
+	.name   = GPIO_REGULATOR_DEV_NAME,
+	.id = APQ8064_EXT_3P3V_REG_EN_GPIO,
+	.dev    = {
+		.platform_data =
+			&m7_gpio_regulator_pdata[GPIO_VREG_ID_EXT_3P3V],
+	},
+};
+
 static struct platform_device m7_device_ext_ts_sw_vreg __devinitdata = {
 	.name	= GPIO_REGULATOR_DEV_NAME,
 	.id	= PM8921_GPIO_PM_TO_SYS(23),
@@ -4189,7 +4194,6 @@ static struct platform_device m7_device_ext_ts_sw_vreg __devinitdata = {
 			= &m7_gpio_regulator_pdata[GPIO_VREG_ID_EXT_TS_SW],
 	},
 };
-#endif
 
 
 static struct platform_device m7_device_rpm_regulator __devinitdata = {
@@ -4416,7 +4420,8 @@ static struct platform_device *common_devices[] __initdata = {
 #endif
 	&m7_device_ext_5v_vreg,
 	&m7_device_ext_mpp8_vreg,
-	//&m7_device_ext_ts_sw_vreg,
+	&m7_device_ext_3p3v_vreg,
+	&m7_device_ext_ts_sw_vreg,
 	&apq8064_device_ssbi_pmic1,
 	&apq8064_device_ssbi_pmic2,
 	&msm_device_smd_apq8064,
@@ -4546,6 +4551,7 @@ static struct platform_device *common_devices[] __initdata = {
 	&apq_lowlatency_pcm,
 	&msm8064_pc_cntr,
 	&msm8064_cpu_slp_status,
+#if 0
 	&coresight_tpiu_device,
 	&coresight_etb_device,
 	&apq8064_coresight_funnel_device,
@@ -4553,6 +4559,7 @@ static struct platform_device *common_devices[] __initdata = {
 	&coresight_etm1_device,
 	&coresight_etm2_device,
 	&coresight_etm3_device,
+#endif
 	&apq8064_msm_mpd_device,
 };
 

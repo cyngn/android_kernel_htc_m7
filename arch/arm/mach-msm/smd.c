@@ -2856,6 +2856,39 @@ int smsm_get_intr_mask(uint32_t smsm_entry, uint32_t *intr_mask)
 }
 EXPORT_SYMBOL(smsm_get_intr_mask);
 
+int smsm_change_state_ssr(uint32_t smsm_entry,
+			  uint32_t clear_mask, uint32_t set_mask, uint32_t kernel_flag)
+{             
+	unsigned long flags;
+	uint32_t  old_state, new_state;
+	
+	if (smsm_entry >= SMSM_NUM_ENTRIES) {
+		pr_err("[SMD] smsm_change_state: Invalid entry %d",
+			   smsm_entry);
+		return -EINVAL;
+	}   
+	
+	if (!smsm_info.state) {
+		pr_err("[SMD] smsm_change_state <SM NO STATE>\n");
+		return -EIO;
+	}   
+	spin_lock_irqsave(&smem_lock, flags);
+	
+	old_state = __raw_readl(SMSM_STATE_ADDR(smsm_entry));
+	new_state = (old_state & ~clear_mask) | set_mask;
+	__raw_writel(new_state, SMSM_STATE_ADDR(smsm_entry));
+	SMSM_INFO("smsm_change_state old %x new %x\n", old_state, new_state);
+	
+
+	if(!(clear_mask & SMSM_RESET))
+		notify_other_smsm(SMSM_APPS_STATE, (old_state ^ new_state));
+
+	spin_unlock_irqrestore(&smem_lock, flags);
+
+	return 0;
+}
+EXPORT_SYMBOL(smsm_change_state_ssr);
+
 int smsm_change_state(uint32_t smsm_entry,
 		      uint32_t clear_mask, uint32_t set_mask)
 {

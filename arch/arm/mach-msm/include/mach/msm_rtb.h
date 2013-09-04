@@ -34,6 +34,10 @@ struct msm_rtb_platform_data {
 };
 
 #if defined(CONFIG_MSM_RTB)
+int msm_rtb_enabled(void);
+
+void msm_rtb_disable(void);
+
 /*
  * returns 1 if data was logged, 0 otherwise
  */
