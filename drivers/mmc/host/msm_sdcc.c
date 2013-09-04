@@ -5000,6 +5000,12 @@ static void msmsdcc_dump_sdcc_state(struct msmsdcc_host *host)
 			pr_err("%s: SPS mode: busy=%d\n",
 				mmc_hostname(host->mmc), host->sps.busy);
 
+#ifdef CONFIG_SPS
+			
+			sps_get_bam_debug_info(host->sps.bam_handle, 3);
+			sps_get_bam_debug_info(host->sps.bam_handle, 4);
+			sps_get_bam_debug_info(host->sps.bam_handle, 1);
+#endif
 		}
 
 		pr_err("%s: xfer_size=%d, data_xfered=%d, xfer_remain=%d\n",
