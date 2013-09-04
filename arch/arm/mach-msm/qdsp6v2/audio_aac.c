@@ -20,6 +20,7 @@
 
 #define AUDIO_AAC_DUAL_MONO_INVALID -1
 #define PCM_BUFSZ_MIN_AAC	((8*1024) + sizeof(struct dec_meta_out))
+#define Q6_EFFECT_DEBUG 0
 
 #ifdef CONFIG_DEBUG_FS
 static const struct file_operations audio_aac_debug_fops = {
@@ -170,6 +171,73 @@ static long audio_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 		break;
 	}
+	case AUDIO_SET_Q6_EFFECT: {
+		struct param {
+			uint32_t effect_type;
+			uint32_t module_id;
+			uint32_t param_id;
+			uint32_t payload_size;
+		} q6_param;
+		void *payload;
+		
+		pr_aud_info("AUDIO_SET_Q6_EFFECT, session %d ++++\n", audio->ac->session);
+		if (copy_from_user(&q6_param, (void *) arg,
+					sizeof(q6_param))) {
+			pr_aud_err("%s: copy param from user failed\n",
+				__func__);
+			rc = -EFAULT;
+			break;
+		}   
+		
+		if (q6_param.payload_size <= 0 ||
+			(q6_param.effect_type != 0 &&
+			 q6_param.effect_type != 1)) {
+			pr_aud_err("%s: unsupported param: %d, 0x%x, 0x%x, %d\n",
+				__func__, q6_param.effect_type,
+				q6_param.module_id, q6_param.param_id,
+				q6_param.payload_size);
+			rc = -EINVAL;
+			break;
+		}   
+		
+		payload = kzalloc(q6_param.payload_size, GFP_KERNEL);
+		if (!payload) {
+			pr_aud_err("%s: failed to allocate memory\n",
+				__func__);
+			rc = -ENOMEM;
+			break;
+		}   
+		if (copy_from_user(payload, (void *) (arg + sizeof(q6_param)),
+			q6_param.payload_size)) {
+			pr_aud_err("%s: copy payload from user failed\n",
+				__func__);
+			kfree(payload);
+			rc = -EFAULT;
+			break;;
+		}
+		
+		if (q6_param.effect_type == 0) {
+			rc = q6asm_enable_effect(audio->ac,
+						q6_param.module_id,
+						q6_param.param_id,
+						q6_param.payload_size,
+						payload);
+			pr_aud_info("q6asm_enable_effect, return %d (session %d)\n", rc, audio->ac->session);
+		}   
+#if Q6_EFFECT_DEBUG
+		{
+			int *ptr;
+			int i;
+			ptr = (int *)payload;
+			for (i = 0; i < (q6_param.payload_size / 4); i++)
+				pr_aud_info("0x%08x", *(ptr + i)); 
+		}       
+#endif  
+		kfree(payload);
+		pr_aud_info("AUDIO_SET_Q6_EFFECT, session %d ---\n", audio->ac->session);
+		break;
+	}   
+
 	default:
 		pr_debug("%s[%p]: Calling utils ioctl\n", __func__, audio);
 		rc = audio->codec_ioctl(file, cmd, arg);

@@ -626,6 +626,10 @@ struct adm_cmd_memory_unmap_regions{
 #define ASM_OPEN_READ_PERF_MODE_BIT			(1<<29)
 #define ADM_MULTI_CH_COPP_OPEN_PERF_MODE_BIT		(1<<13)
 
+#define HTC_STEREO_RECORD_TOPOLOGY          0x10000000
+#define HTC_COPP_TOPOLOGY               0x10000001
+#define HTC_POPP_TOPOLOGY               0x10000002
+
 /* SRS TRUMEDIA GUIDS */
 /* topology */
 #define SRS_TRUMEDIA_TOPOLOGY_ID			0x00010D90

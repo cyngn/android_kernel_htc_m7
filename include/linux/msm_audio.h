@@ -67,6 +67,8 @@
 
 #define AUDIO_SET_SRS_TRUMEDIA_PARAM _IOW(AUDIO_IOCTL_MAGIC, 43, unsigned)
 
+#define AUDIO_SET_Q6_EFFECT  _IOW(AUDIO_IOCTL_MAGIC, 43, unsigned)
+
 /* Qualcomm extensions */
 #define AUDIO_SET_STREAM_CONFIG   _IOW(AUDIO_IOCTL_MAGIC, 80, \
 				struct msm_audio_stream_config)

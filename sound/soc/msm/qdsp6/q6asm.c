@@ -184,6 +184,13 @@ struct asm_mmap {
 };
 
 static struct asm_mmap this_mmap;
+static struct q6asm_ops default_qops;
+static struct q6asm_ops *qops = &default_qops;
+
+void htc_register_q6asm_ops(struct q6asm_ops *ops)
+{
+	qops = ops;
+}
 
 static int q6asm_session_alloc(struct audio_client *ac)
 {
@@ -1549,6 +1556,15 @@ int q6asm_open_write(struct audio_client *ac, uint32_t format)
 	open.post_proc_top = get_asm_topology();
 	if (open.post_proc_top == 0)
 		open.post_proc_top = DEFAULT_POPP_TOPOLOGY;
+
+	if (qops->get_q6_effect) {
+		int mode = qops->get_q6_effect();
+		if (mode == 0) {
+			pr_info("%s: change to HTC_POPP_TOPOLOGY\n",
+					__func__);
+			open.post_proc_top = HTC_POPP_TOPOLOGY;
+		}
+	}
 
 	switch (format) {
 	case FORMAT_LINEAR_PCM:
