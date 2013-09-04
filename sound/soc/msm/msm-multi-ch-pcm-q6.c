@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -28,6 +28,7 @@
 #include <sound/pcm.h>
 #include <sound/initval.h>
 #include <sound/control.h>
+#include <sound/timer.h>
 
 #include "msm-pcm-q6.h"
 #include "msm-pcm-routing.h"
@@ -78,8 +79,7 @@ static struct snd_pcm_hardware msm_pcm_hardware_playback = {
 				SNDRV_PCM_INFO_MMAP_VALID |
 				SNDRV_PCM_INFO_INTERLEAVED |
 				SNDRV_PCM_INFO_PAUSE | SNDRV_PCM_INFO_RESUME),
-	.formats =              SNDRV_PCM_FMTBIT_S16_LE
-				| SNDRV_PCM_FMTBIT_S24_LE,
+	.formats =              SNDRV_PCM_FMTBIT_S16_LE,
 	.rates =                SNDRV_PCM_RATE_8000_48000 | SNDRV_PCM_RATE_KNOT,
 	.rate_min =             8000,
 	.rate_max =             48000,
@@ -93,6 +93,7 @@ static struct snd_pcm_hardware msm_pcm_hardware_playback = {
 	.fifo_size =            0,
 };
 
+/* Conventional and unconventional sample rate supported */
 static unsigned int supported_sample_rates[] = {
 	8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000
 };
@@ -110,6 +111,9 @@ static void event_handler(uint32_t opcode,
 {
 	struct msm_audio *prtd = priv;
 	struct snd_pcm_substream *substream = prtd->substream;
+	struct snd_pcm_runtime *runtime = substream->runtime;
+	struct audio_aio_write_param param;
+	struct audio_buffer *buf = NULL;
 	uint32_t *ptrmem = (uint32_t *)payload;
 	int i = 0;
 	uint32_t idx = 0;
@@ -118,6 +122,7 @@ static void event_handler(uint32_t opcode,
 	pr_debug("%s\n", __func__);
 	switch (opcode) {
 	case ASM_DATA_EVENT_WRITE_DONE: {
+		uint32_t *ptrmem = (uint32_t *)&param;
 		pr_debug("ASM_DATA_EVENT_WRITE_DONE\n");
 		pr_debug("Buffer Consumed = 0x%08x\n", *ptrmem);
 		prtd->pcm_irq_pos += prtd->pcm_count;
@@ -129,14 +134,31 @@ static void event_handler(uint32_t opcode,
 			break;
 		if (!prtd->mmap_flag)
 			break;
-		if (q6asm_is_cpu_buf_avail_nolock(IN,
-				prtd->audio_client,
-				&size, &idx)) {
-			pr_debug("%s:writing %d bytes of buffer to dsp 2\n",
-					__func__, prtd->pcm_count);
-			q6asm_write_nolock(prtd->audio_client,
-				prtd->pcm_count, 0, 0, NO_TIMESTAMP);
-		}
+		buf = prtd->audio_client->port[IN].buf;
+		pr_debug("%s:writing %d bytes of buffer[%d] to dsp 2\n",
+				__func__, prtd->pcm_count, prtd->out_head);
+		pr_debug("%s:writing buffer[%d] from 0x%08x\n",
+				__func__, prtd->out_head,
+				((unsigned int)buf[0].phys
+				+ (prtd->out_head * prtd->pcm_count)));
+		param.paddr = (unsigned long)buf[0].phys
+				+ (prtd->out_head * prtd->pcm_count);
+		param.len = prtd->pcm_count;
+		param.msw_ts = 0;
+		param.lsw_ts = 0;
+		param.flags = NO_TIMESTAMP;
+		param.uid =  (unsigned long)buf[0].phys
+				+ (prtd->out_head * prtd->pcm_count);
+		for (i = 0; i < sizeof(struct audio_aio_write_param)/4;
+					i++, ++ptrmem)
+			pr_debug("cmd[%d]=0x%08x\n", i, *ptrmem);
+		if (q6asm_async_write(prtd->audio_client,
+					&param) < 0)
+			pr_err("%s:q6asm_async_write failed\n",
+				__func__);
+		else
+			prtd->out_head =
+			(prtd->out_head + 1) & (runtime->periods - 1);
 		break;
 	}
 	case ASM_DATA_CMDRSP_EOS:
@@ -174,18 +196,36 @@ static void event_handler(uint32_t opcode,
 				break;
 			}
 			if (prtd->mmap_flag) {
-				pr_debug("%s:writing %d bytes"
-					" of buffer to dsp\n",
-					__func__,
-					prtd->pcm_count);
-				q6asm_write_nolock(prtd->audio_client,
-					prtd->pcm_count,
-					0, 0, NO_TIMESTAMP);
+				pr_debug("%s:writing %d bytes"\
+					" of buffer[%d] to dsp\n",
+					__func__, prtd->pcm_count,
+					prtd->out_head);
+				buf = prtd->audio_client->port[IN].buf;
+				pr_debug("%s:writing buffer[%d] from 0x%08x\n",
+					__func__, prtd->out_head,
+					((unsigned int)buf[0].phys
+					+ (prtd->out_head * prtd->pcm_count)));
+				param.paddr = (unsigned long)
+						buf[prtd->out_head].phys;
+				param.len = prtd->pcm_count;
+				param.msw_ts = 0;
+				param.lsw_ts = 0;
+				param.flags = NO_TIMESTAMP;
+				param.uid =  (unsigned long)
+						buf[prtd->out_head].phys;
+				if (q6asm_async_write(prtd->audio_client,
+							&param) < 0)
+					pr_err("%s:q6asm_async_write failed\n",
+						__func__);
+				else
+					prtd->out_head =
+						(prtd->out_head + 1)
+						& (runtime->periods - 1);
 			} else {
 				while (atomic_read(&prtd->out_needed)) {
-					pr_debug("%s:writing %d bytes"
-						 " of buffer to dsp\n",
-						__func__,
+					pr_debug("%s:writing %d bytesi" \
+						  " of buffer to dsp\n", \
+						__func__, \
 						prtd->pcm_count);
 					q6asm_write_nolock(prtd->audio_client,
 						prtd->pcm_count,
@@ -212,25 +252,26 @@ static int msm_pcm_playback_prepare(struct snd_pcm_substream *substream)
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct msm_audio *prtd = runtime->private_data;
 	int ret;
-	short bit_width = 16;
 
 	pr_debug("%s\n", __func__);
+	if (prtd->mmap_flag) {
+		ret = q6asm_set_io_mode(prtd->audio_client, ASYNC_IO_MODE);
+		if (ret < 0) {
+			pr_err("%s: Set IO mode failed\n", __func__);
+			return -ENOMEM;
+		}
+	}
 	prtd->pcm_size = snd_pcm_lib_buffer_bytes(substream);
 	prtd->pcm_count = snd_pcm_lib_period_bytes(substream);
 	prtd->pcm_irq_pos = 0;
-	
+	/* rate and channels are sent to audio driver */
 	prtd->samp_rate = runtime->rate;
 	prtd->channel_mode = runtime->channels;
 	if (prtd->enabled)
 		return 0;
 
-	if (runtime->format == SNDRV_PCM_FORMAT_S24_LE)
-		bit_width = 24;
-
-	ret = q6asm_media_format_block_multi_ch_pcm_format_support(
-			prtd->audio_client, runtime->rate, runtime->channels,
-			bit_width);
-
+	ret = q6asm_media_format_block_multi_ch_pcm(prtd->audio_client,
+			runtime->rate, runtime->channels);
 	if (ret < 0)
 		pr_info("%s: CMD Format block failed\n", __func__);
 
@@ -253,7 +294,7 @@ static int msm_pcm_capture_prepare(struct snd_pcm_substream *substream)
 	prtd->pcm_count = snd_pcm_lib_period_bytes(substream);
 	prtd->pcm_irq_pos = 0;
 
-	
+	/* rate and channels are sent to audio driver */
 	prtd->samp_rate = runtime->rate;
 	prtd->channel_mode = runtime->channels;
 
@@ -355,7 +396,7 @@ static int msm_pcm_open(struct snd_pcm_substream *substream)
 			return -ENOMEM;
 		}
 	}
-	
+	/* Capture path */
 	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
 		runtime->hw = msm_pcm_hardware_capture;
 		ret = q6asm_open_read(prtd->audio_client,
@@ -382,7 +423,7 @@ static int msm_pcm_open(struct snd_pcm_substream *substream)
 				&constraints_sample_rates);
 	if (ret < 0)
 		pr_err("snd_pcm_hw_constraint_list failed\n");
-	
+	/* Ensure that buffer size is a multiple of period size */
 	ret = snd_pcm_hw_constraint_integer(runtime,
 					    SNDRV_PCM_HW_PARAM_PERIODS);
 	if (ret < 0)

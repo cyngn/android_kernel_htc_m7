@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -18,7 +18,7 @@
 struct pcm_afe_info {
 	unsigned long dma_addr;
 	struct snd_pcm_substream *substream;
-	unsigned int pcm_irq_pos;       
+	unsigned int pcm_irq_pos;       /* IRQ position */
 	struct mutex lock;
 	spinlock_t dsp_lock;
 	uint32_t samp_rate;
@@ -43,4 +43,4 @@ struct pcm_afe_info {
 	.private_value = addr, \
 	}
 
-#endif 
+#endif /*_MSM_PCM_AFE_H*/

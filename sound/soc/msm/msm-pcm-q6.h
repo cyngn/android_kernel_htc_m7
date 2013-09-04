@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2008 Google, Inc.
  * Copyright (C) 2008 HTC Corporation
- * Copyright (c) 2008-2009,2011 Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2008-2009,2011 The Linux Foundation. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -22,6 +22,7 @@
 #include <sound/q6asm.h>
 
 
+/* Support unconventional sample rates 12000, 24000 as well */
 #define USE_RATE                \
 			(SNDRV_PCM_RATE_8000_48000 | SNDRV_PCM_RATE_KNOT)
 
@@ -54,8 +55,8 @@ struct msm_audio {
 	struct snd_pcm_substream *substream;
 	unsigned int pcm_size;
 	unsigned int pcm_count;
-	unsigned int pcm_irq_pos;       
-	uint16_t source; 
+	unsigned int pcm_irq_pos;       /* IRQ position */
+	uint16_t source; /* Encoding source bit mask */
 
 	struct audio_client *audio_client;
 
@@ -65,7 +66,7 @@ struct msm_audio {
 	uint32_t channel_mode;
 	uint32_t dsp_cnt;
 
-	int abort; 
+	int abort; /* set when error, like sample rate mismatch */
 
 	int enabled;
 	int close_ack;
@@ -92,4 +93,4 @@ struct output_meta_data_st {
 	uint32_t reserved[12];
 };
 
-#endif 
+#endif /*_MSM_PCM_H*/
