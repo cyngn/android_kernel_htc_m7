@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2007 Google, Inc.
- * Copyright (c) 2008-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2008-2012, The Linux Foundation. All rights reserved.
  * Author: Brian Swetland <swetland@google.com>
  *
  * This software is licensed under the terms of the GNU General Public
@@ -23,6 +23,14 @@
 #ifndef __ASM_ARCH_MSM_IOMAP_8064_H
 #define __ASM_ARCH_MSM_IOMAP_8064_H
 
+/* Physical base address and size of peripherals.
+ * Ordered by the virtual base addresses they will be mapped at.
+ *
+ * If you add or remove entries here, you'll want to edit the
+ * msm_io_desc array in arch/arm/mach-msm/io.c to reflect your
+ * changes.
+ *
+ */
 
 #define APQ8064_TMR_PHYS		0x0200A000
 #define APQ8064_TMR_SIZE		SZ_4K
@@ -70,7 +78,7 @@
 #define APQ8064_IMEM_SIZE		SZ_4K
 
 #define APQ8064_RPM_PHYS		0x00108000
-#define APQ8064_RPM_SIZE		SZ_24K
+#define APQ8064_RPM_SIZE		SZ_4K
 
 #define APQ8064_RPM_MPM_PHYS		0x00200000
 #define APQ8064_RPM_MPM_SIZE		SZ_4K
@@ -100,7 +108,11 @@
 
 #ifdef CONFIG_DEBUG_APQ8064_UART
 #define MSM_DEBUG_UART_BASE		IOMEM(0xFA740000)
+#ifdef CONFIG_MACH_APQ8064_MAKO
+#define MSM_DEBUG_UART_PHYS		0x16340000
+#else
 #define MSM_DEBUG_UART_PHYS		0x16640000
+#endif
 #endif
 
 #endif
