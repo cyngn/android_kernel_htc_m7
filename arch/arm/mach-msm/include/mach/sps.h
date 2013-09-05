@@ -1258,8 +1258,7 @@ int sps_get_unused_desc_num(struct sps_pipe *h, u32 *desc_num);
  * @return 0 on success, negative value on error
  *
  */
-int sps_get_bam_debug_info(u32 dev, u32 option, u32 para,
-		u32 tb_sel, u8 desc_sel);
+int sps_get_bam_debug_info(u32 dev, u32 option);
 
 #else
 static inline int sps_register_bam_device(const struct sps_bam_props
@@ -1418,8 +1417,7 @@ static inline int sps_get_unused_desc_num(struct sps_pipe *h, u32 *desc_num)
 	return -EPERM;
 }
 
-static inline int sps_get_bam_debug_info(u32 dev, u32 option, u32 para,
-		u32 tb_sel, u8 pre_level)
+static inline int sps_get_bam_debug_info(u32 dev, u32 option)
 {
 	return -EPERM;
 }
