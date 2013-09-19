@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -27,4 +27,4 @@
 
 #define DSPS_IOCTL_RESET _IO(DSPS_IOCTL_MAGIC, 5)
 
-#endif	
+#endif	/* _DSPS_H_ */

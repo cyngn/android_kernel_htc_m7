@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2010-2011, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -32,13 +32,8 @@ struct pm8xxx_vibrator_platform_data {
 	int initial_vibrate_ms;
 	int max_timeout_ms;
 	int level_mV;
-	int threshold;
-	void (*camera_cb) (void);
-	void (*camera_off_cb) (void);
 };
 
 int pm8xxx_vibrator_config(struct pm8xxx_vib_config *vib_config);
 
-extern int vibrate(int time);
-
-#endif 
+#endif /* __PMIC8XXX_VIBRATOR_H__ */

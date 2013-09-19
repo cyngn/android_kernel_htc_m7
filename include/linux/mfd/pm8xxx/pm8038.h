@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -9,6 +9,10 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ */
+/*
+ * Qualcomm PMIC 8038 driver header file
+ *
  */
 
 #ifndef __MFD_PM8038_H
@@ -26,11 +30,11 @@
 #include <linux/mfd/pm8xxx/pm8xxx-adc.h>
 #include <linux/mfd/pm8xxx/pm8921-charger.h>
 #include <linux/mfd/pm8xxx/pm8921-bms.h>
-#include <linux/leds-pm8038.h>
+#include <linux/leds-pm8xxx.h>
 #include <linux/mfd/pm8xxx/ccadc.h>
 #include <linux/mfd/pm8xxx/spk.h>
 #include <linux/mfd/pm8xxx/tm.h>
-#include <linux/mfd/pm8xxx/vibrator.h>
+
 #define PM8038_CORE_DEV_NAME "pm8038-core"
 
 #define PM8038_NR_IRQS		256
@@ -42,12 +46,15 @@
 
 #define PM8038_IRQ_BLOCK_BIT(block, bit) ((block) * 8 + (bit))
 
+/* GPIO and MPPs [1,N] */
 #define PM8038_GPIO_IRQ(base, gpio)	((base) + \
 		PM8038_IRQ_BLOCK_BIT(PM8038_GPIO_BLOCK_START, (gpio)-1))
 #define PM8038_MPP_IRQ(base, mpp)	((base) + \
 		PM8038_IRQ_BLOCK_BIT(PM8038_MPP_BLOCK_START, (mpp)-1))
 
+/* PMIC Interrupts */
 #define PM8038_RTC_ALARM_IRQ		PM8038_IRQ_BLOCK_BIT(4, 7)
+#define PM8038_BATT_ALARM_IRQ		PM8921_IRQ_BLOCK_BIT(5, 6)
 #define PM8038_PWRKEY_REL_IRQ		PM8038_IRQ_BLOCK_BIT(6, 2)
 #define PM8038_PWRKEY_PRESS_IRQ		PM8038_IRQ_BLOCK_BIT(6, 3)
 #define PM8038_KEYPAD_IRQ		PM8038_IRQ_BLOCK_BIT(9, 2)
@@ -76,9 +83,9 @@ struct pm8038_platform_data {
 	struct pm8921_bms_platform_data		*bms_pdata;
 	struct pm8xxx_adc_platform_data		*adc_pdata;
 	struct pm8xxx_led_platform_data		*leds_pdata;
+	struct pm8xxx_vibrator_platform_data	*vibrator_pdata;
 	struct pm8xxx_ccadc_platform_data	*ccadc_pdata;
 	struct pm8xxx_spk_platform_data		*spk_pdata;
-        struct pm8xxx_vibrator_platform_data    *vibrator_pdata;
 };
 
 #endif
