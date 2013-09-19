@@ -45,6 +45,7 @@ static struct gpio_event_direct_entry m7_keypad_map[] = {
 	},
 };
 
+#if 0
 static uint32_t matirx_inputs_gpio_table[] = {
 	GPIO_CFG(PWR_KEY_MSMz, 0, GPIO_CFG_INPUT, GPIO_CFG_PULL_UP,
 		 GPIO_CFG_2MA),
@@ -80,6 +81,7 @@ static void m7_clear_hw_reset(void)
 	gpio_tlmm_config(hw_clr_gpio_table[0], GPIO_CFG_ENABLE);
 	printk(KERN_INFO "[KEY] %s ------\n", __func__);
 }
+#endif
 
 static struct gpio_event_input_info m7_keypad_power_info = {
 	.info.func = gpio_event_input_func,
@@ -92,8 +94,8 @@ static struct gpio_event_input_info m7_keypad_power_info = {
 # endif
 	.keymap = m7_keypad_map,
 	.keymap_size = ARRAY_SIZE(m7_keypad_map),
-	.setup_input_gpio = m7_direct_inputs_gpio,
-	.clear_hw_reset = m7_clear_hw_reset,
+	//.setup_input_gpio = m7_direct_inputs_gpio,
+	//.clear_hw_reset = m7_clear_hw_reset,
 };
 
 static struct gpio_event_info *m7_keypad_info[] = {

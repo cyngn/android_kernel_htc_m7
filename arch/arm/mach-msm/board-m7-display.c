@@ -903,16 +903,16 @@ static int mipi_dsi_panel_power(int on)
 				pr_err("enable lvs5 failed, rc=%d\n", rc);
 				return -ENODEV;
 			}
-			hr_msleep(1);
+			msleep_interruptible(1);
 			gpio_set_value_cansleep(gpio37, 1);
-			hr_msleep(2);	
+			msleep_interruptible(2);	
 			gpio_set_value_cansleep(gpio36, 1);
-			hr_msleep(7);	
+			msleep_interruptible(7);	
 			gpio_set_value(LCD_RST, 1);
 
 			
 			msm_xo_mode_vote(wa_xo, MSM_XO_MODE_ON);
-			hr_msleep(10);
+			msleep_interruptible(10);
 			
 			msm_xo_mode_vote(wa_xo, MSM_XO_MODE_OFF);
 		} else {
@@ -956,13 +956,13 @@ static int mipi_dsi_panel_power(int on)
 		gpio_set_value(BL_HW_EN, 0);
 
 		gpio_set_value(LCD_RST, 0);
-		hr_msleep(3);	
+		msleep_interruptible(3);	
 
 		gpio_set_value_cansleep(gpio36, 0);
-		hr_msleep(2);
+		msleep_interruptible(2);
 		gpio_set_value_cansleep(gpio37, 0);
 
-		hr_msleep(8);	
+		msleep_interruptible(8);	
 		rc = regulator_disable(reg_lvs5);
 		if (rc) {
 			pr_err("disable reg_lvs5 failed, rc=%d\n", rc);
