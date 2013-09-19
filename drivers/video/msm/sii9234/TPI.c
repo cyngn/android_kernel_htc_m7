@@ -579,43 +579,43 @@ void CbusWakeUpPulseGenerator(void)
 	
 	regval |= 0xC0;
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
-	hr_msleep(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
+	msleep_interruptible(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
 
 	
 	regval &= 0x3F;
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
-	hr_msleep(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
+	msleep_interruptible(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
 
 	
 	regval |= 0xC0;
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
-	hr_msleep(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
+	msleep_interruptible(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
 
 	
 	regval &= 0x3F;
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
-	hr_msleep(T_SRC_WAKE_PULSE_WIDTH_2 - 2);
+	msleep_interruptible(T_SRC_WAKE_PULSE_WIDTH_2 - 2);
 
 	
 	regval |= 0xC0;
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
-	hr_msleep(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
+	msleep_interruptible(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
 
 	
 	regval &= 0x3F;
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
-	hr_msleep(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
+	msleep_interruptible(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
 
 	
 	regval |= 0xC0;
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
-	hr_msleep(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
+	msleep_interruptible(T_SRC_WAKE_PULSE_WIDTH_1 - 2);
 
 	
 	regval &= 0x3F;
 	I2C_WriteByte(TPI_SLAVE_ADDR, 0x96, regval);
 
-	hr_msleep(T_SRC_WAKE_TO_DISCOVER);
+	msleep_interruptible(T_SRC_WAKE_TO_DISCOVER);
 
 	TPI_DEBUG_PRINT(("Drv: CbusWakeUpPulseGenerator - end\n"));
 }

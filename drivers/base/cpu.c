@@ -1,3 +1,6 @@
+/*
+ * CPU subsystem support
+ */
 
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -22,26 +25,6 @@ EXPORT_SYMBOL_GPL(cpu_subsys);
 static DEFINE_PER_CPU(struct device *, cpu_sys_devices);
 
 #ifdef CONFIG_HOTPLUG_CPU
-#include <linux/reboot.h>
-static int stall_cpu_hotplug = 0;
-static int cpu_restart_call
-(struct notifier_block *this, unsigned long code, void *_cmd)
-{
-	if (code == SYS_RESTART || code == SYS_POWER_OFF || code == SYSTEM_HALT) {
-		stall_cpu_hotplug = 1;
-#ifdef CONFIG_ARCH_APQ8064
-		cpu_down(1);
-		cpu_down(2);
-		cpu_down(3);
-#endif
-	}
-
-	return NOTIFY_DONE;
-}
-static struct notifier_block cpu_restart_notifier = {
-	.notifier_call = cpu_restart_call,
-};
-
 static ssize_t show_online(struct device *dev,
 			   struct device_attribute *attr,
 			   char *buf)
@@ -57,12 +40,6 @@ static ssize_t __ref store_online(struct device *dev,
 {
 	struct cpu *cpu = container_of(dev, struct cpu, dev);
 	ssize_t ret;
-
-	if(stall_cpu_hotplug) {
-		pr_info("[K] skip cpu%u hotplug while system restarting.\n",
-		       cpu->dev.id);
-		return -EBUSY;
-	}
 
 	cpu_hotplug_driver_lock();
 	switch (buf[0]) {
@@ -123,13 +100,13 @@ static ssize_t cpu_release_store(struct device *dev,
 
 static DEVICE_ATTR(probe, S_IWUSR, NULL, cpu_probe_store);
 static DEVICE_ATTR(release, S_IWUSR, NULL, cpu_release_store);
-#endif 
+#endif /* CONFIG_ARCH_CPU_PROBE_RELEASE */
 
-#else 
+#else /* ... !CONFIG_HOTPLUG_CPU */
 static inline void register_cpu_control(struct cpu *cpu)
 {
 }
-#endif 
+#endif /* CONFIG_HOTPLUG_CPU */
 
 #ifdef CONFIG_KEXEC
 #include <linux/kexec.h>
@@ -144,6 +121,12 @@ static ssize_t show_crash_notes(struct device *dev, struct device_attribute *att
 
 	cpunum = cpu->dev.id;
 
+	/*
+	 * Might be reading other cpu's data based on which cpu read thread
+	 * has been scheduled. But cpu data (memory) is allocated once during
+	 * boot up and this data does not change there after. Hence this
+	 * operation should be safe. No locking required.
+	 */
 	addr = per_cpu_ptr_to_phys(per_cpu_ptr(crash_notes, cpunum));
 	rc = sprintf(buf, "%Lx\n", addr);
 	return rc;
@@ -151,6 +134,9 @@ static ssize_t show_crash_notes(struct device *dev, struct device_attribute *att
 static DEVICE_ATTR(crash_notes, 0400, show_crash_notes, NULL);
 #endif
 
+/*
+ * Print cpu online, possible, present, and system maps
+ */
 
 struct cpu_attr {
 	struct device_attribute attr;
@@ -172,12 +158,16 @@ static ssize_t show_cpus_attr(struct device *dev,
 #define _CPU_ATTR(name, map) \
 	{ __ATTR(name, 0444, show_cpus_attr, NULL), map }
 
+/* Keep in sync with cpu_subsys_attrs */
 static struct cpu_attr cpu_attrs[] = {
 	_CPU_ATTR(online, &cpu_online_mask),
 	_CPU_ATTR(possible, &cpu_possible_mask),
 	_CPU_ATTR(present, &cpu_present_mask),
 };
 
+/*
+ * Print values for NR_CPUS and offlined cpus
+ */
 static ssize_t print_cpus_kernel_max(struct device *dev,
 				     struct device_attribute *attr, char *buf)
 {
@@ -186,6 +176,7 @@ static ssize_t print_cpus_kernel_max(struct device *dev,
 }
 static DEVICE_ATTR(kernel_max, 0444, print_cpus_kernel_max, NULL);
 
+/* arch-optional setting to enable display of offline cpus >= nr_cpu_ids */
 unsigned int total_cpus;
 
 static ssize_t print_cpus_offline(struct device *dev,
@@ -194,14 +185,14 @@ static ssize_t print_cpus_offline(struct device *dev,
 	int n = 0, len = PAGE_SIZE-2;
 	cpumask_var_t offline;
 
-	
+	/* display offline cpus < nr_cpu_ids */
 	if (!alloc_cpumask_var(&offline, GFP_KERNEL))
 		return -ENOMEM;
 	cpumask_andnot(offline, cpu_possible_mask, cpu_online_mask);
 	n = cpulist_scnprintf(buf, len, offline);
 	free_cpumask_var(offline);
 
-	
+	/* display offline cpus >= nr_cpu_ids */
 	if (total_cpus && nr_cpu_ids < total_cpus) {
 		if (n && n < len)
 			buf[n++] = ',';
@@ -220,8 +211,31 @@ static DEVICE_ATTR(offline, 0444, print_cpus_offline, NULL);
 
 static void cpu_device_release(struct device *dev)
 {
+	/*
+	 * This is an empty function to prevent the driver core from spitting a
+	 * warning at us.  Yes, I know this is directly opposite of what the
+	 * documentation for the driver core and kobjects say, and the author
+	 * of this code has already been publically ridiculed for doing
+	 * something as foolish as this.  However, at this point in time, it is
+	 * the only way to handle the issue of statically allocated cpu
+	 * devices.  The different architectures will have their cpu device
+	 * code reworked to properly handle this in the near future, so this
+	 * function will then be changed to correctly free up the memory held
+	 * by the cpu device.
+	 *
+	 * Never copy this way of doing things, or you too will be made fun of
+	 * on the linux-kerenl list, you have been warned.
+	 */
 }
 
+/*
+ * register_cpu - Setup a sysfs device for a CPU.
+ * @cpu - cpu->hotpluggable field set to 1 will generate a control file in
+ *	  sysfs for this CPU.
+ * @num - CPU number to use when creating the device.
+ *
+ * Initialize and register the CPU device.
+ */
 int __cpuinit register_cpu(struct cpu *cpu, int num)
 {
 	int error;
@@ -319,8 +333,5 @@ void __init cpu_dev_init(void)
 
 #if defined(CONFIG_SCHED_MC) || defined(CONFIG_SCHED_SMT)
 	sched_create_sysfs_power_savings_entries(cpu_subsys.dev_root);
-#endif
-#if defined(CONFIG_HOTPLUG_CPU)
-	register_reboot_notifier(&cpu_restart_notifier);
 #endif
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -23,6 +23,7 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 
+/* PMIC8xxx IRQ */
 
 #define SSBI_REG_ADDR_IRQ_ROOT(base)		(base + 0)
 #define SSBI_REG_ADDR_IRQ_M_STATUS1(base)	(base + 1)
@@ -34,18 +35,16 @@
 #define SSBI_REG_ADDR_IRQ_CONFIG(base)		(base + 7)
 #define SSBI_REG_ADDR_IRQ_RT_STATUS(base)	(base + 8)
 
-#define	PM_IRQF_LVL_SEL			0x01	
-#define	PM_IRQF_MASK_FE			0x02	
-#define	PM_IRQF_MASK_RE			0x04	
-#define	PM_IRQF_CLR			0x08	
+#define	PM_IRQF_LVL_SEL			0x01	/* level select */
+#define	PM_IRQF_MASK_FE			0x02	/* mask falling edge */
+#define	PM_IRQF_MASK_RE			0x04	/* mask rising edge */
+#define	PM_IRQF_CLR			0x08	/* clear interrupt */
 #define	PM_IRQF_BITS_MASK		0x70
 #define	PM_IRQF_BITS_SHIFT		4
 #define	PM_IRQF_WRITE			0x80
 
 #define	PM_IRQF_MASK_ALL		(PM_IRQF_MASK_FE | \
 					PM_IRQF_MASK_RE)
-
-#define	MAX_PM_IRQ		256
 
 struct pm_irq_chip {
 	struct device		*dev;
@@ -58,14 +57,6 @@ struct pm_irq_chip {
 	unsigned int		num_masters;
 	u8			config[0];
 };
-
-struct pm_irq_wake_state
-{
-	u8	                wake_enable[MAX_PM_IRQ];
-	u16	                count_wakeable;
-};
-
-struct pm_irq_wake_state pm8xxx_wake_state;
 
 static int pm8xxx_read_root_irq(const struct pm_irq_chip *chip, u8 *rp)
 {
@@ -138,6 +129,10 @@ static int pm8xxx_write_config_irq(struct pm_irq_chip *chip, u8 bp, u8 cp)
 		pr_err("Failed Selecting Block %d rc=%d\n", bp, rc);
 		goto bail;
 	}
+	/*
+	 * Set the write bit here as this could be a unrequested irq
+	 * whose PM_IRQF_WRITE bit is not set
+	 */
 	cp |= PM_IRQF_WRITE;
 	rc = pm8xxx_writeb(chip->dev,
 			SSBI_REG_ADDR_IRQ_CONFIG(chip->base_addr), cp);
@@ -163,7 +158,7 @@ static int pm8xxx_irq_block_handler(struct pm_irq_chip *chip, int block)
 		return 0;
 	}
 
-	
+	/* Check IRQ bits */
 	for (i = 0; i < 8; i++) {
 		if (bits & (1 << i)) {
 			pmirq = block * 8 + i;
@@ -191,7 +186,7 @@ static int pm8xxx_irq_master_handler(struct pm_irq_chip *chip, int master)
 
 	for (i = 0; i < 8; i++)
 		if (blockbits & (1 << i)) {
-			block_number = master * 8 + i;	
+			block_number = master * 8 + i;	/* block # */
 			ret |= pm8xxx_irq_block_handler(chip, block_number);
 		}
 	return ret;
@@ -209,10 +204,10 @@ static irqreturn_t pm8xxx_irq_handler(int irq, void *data)
 		return IRQ_HANDLED;
 	}
 
-	
+	/* on pm8xxx series masters start from bit 1 of the root */
 	masters = root >> 1;
 
-	
+	/* Read allowed masters for blocks. */
 	for (i = 0; i < chip->num_masters; i++)
 		if (masters & (1 << i))
 			pm8xxx_irq_master_handler(chip, i);
@@ -273,7 +268,7 @@ static void pm8xxx_irq_unmask(struct irq_data *d)
 
 	config = chip->config[pmirq];
 	pm8xxx_read_config_irq(chip, block, config, &hw_conf);
-	
+	/* check if it is masked */
 	if ((hw_conf & PM_IRQF_MASK_ALL) == PM_IRQF_MASK_ALL)
 		pm8xxx_write_config_irq(chip, block, config);
 }
@@ -305,6 +300,10 @@ static int pm8xxx_irq_set_type(struct irq_data *d, unsigned int flow_type)
 			chip->config[pmirq] &= ~PM_IRQF_MASK_FE;
 	}
 
+	/*
+	 * The PM_IRQF_WRITE flag serves as an indication that this interrupt
+	 * been requested
+	 */
 	chip->config[pmirq] |= PM_IRQF_WRITE;
 
 	config = chip->config[pmirq] | PM_IRQF_CLR;
@@ -313,21 +312,6 @@ static int pm8xxx_irq_set_type(struct irq_data *d, unsigned int flow_type)
 
 static int pm8xxx_irq_set_wake(struct irq_data *d, unsigned int on)
 {
-	struct pm_irq_chip *chip;
-	unsigned int irq;
-	chip = irq_data_get_irq_chip_data(d);
-	irq = d->irq - chip->irq_base;
-	if (on) {
-		if (!pm8xxx_wake_state.wake_enable[irq]) {
-			pm8xxx_wake_state.wake_enable[irq] = 1;
-		        pm8xxx_wake_state.count_wakeable++;
-		}
-	} else {
-		if (pm8xxx_wake_state.wake_enable[irq]) {
-			pm8xxx_wake_state.wake_enable[irq] = 0;
-			pm8xxx_wake_state.count_wakeable--;
-		}
-	}
 	return 0;
 }
 
@@ -349,6 +333,19 @@ static struct irq_chip pm8xxx_irq_chip = {
 	.flags		= IRQCHIP_MASK_ON_SUSPEND,
 };
 
+/**
+ * pm8xxx_get_irq_stat - get the status of the irq line
+ * @chip: pointer to identify a pmic irq controller
+ * @irq: the irq number
+ *
+ * The pm8xxx gpio and mpp rely on the interrupt block to read
+ * the values on their pins. This function is to facilitate reading
+ * the status of a gpio or an mpp line. The caller has to convert the
+ * gpio number to irq number.
+ *
+ * RETURNS:
+ * an int indicating the value read on that line
+ */
 int pm8xxx_get_irq_stat(struct pm_irq_chip *chip, int irq)
 {
 	int pmirq, rc;
@@ -391,65 +388,6 @@ bail_out:
 }
 EXPORT_SYMBOL_GPL(pm8xxx_get_irq_stat);
 
-int pm8xxx_get_irq_it_stat(struct pm_irq_chip *chip, int irq)
-{
-	int pmirq, rc;
-	u8  block, bits, bit;
-
-	if (chip == NULL || irq < chip->irq_base ||
-			irq >= chip->irq_base + chip->num_irqs)
-		return -EINVAL;
-
-	pmirq = irq - chip->irq_base;
-
-	block = pmirq / 8;
-	bit = pmirq % 8;
-
-	rc = pm8xxx_writeb(chip->dev,
-			SSBI_REG_ADDR_IRQ_BLK_SEL(chip->base_addr), block);
-	if (rc) {
-		pr_err("Failed Selecting block irq=%d pmirq=%d blk=%d rc=%d\n",
-			irq, pmirq, block, rc);
-		goto bail_out;
-	}
-
-	rc = pm8xxx_readb(chip->dev,
-			SSBI_REG_ADDR_IRQ_IT_STATUS(chip->base_addr), &bits);
-	if (rc) {
-		pr_err("Failed Configuring irq=%d pmirq=%d blk=%d rc=%d\n",
-			irq, pmirq, block, rc);
-		goto bail_out;
-	}
-
-	rc = (bits & (1 << bit)) ? 1 : 0;
-
-bail_out:
-
-	return rc;
-}
-EXPORT_SYMBOL_GPL(pm8xxx_get_irq_it_stat);
-
-int pm8xxx_get_irq_wake_stat(struct pm_irq_chip *chip, int irq)
-{
-
-	if (chip == NULL || irq < chip->irq_base ||
-			irq >= chip->irq_base + chip->num_irqs)
-		return -EINVAL;
-
-	return pm8xxx_wake_state.wake_enable[(irq-chip->irq_base)];
-}
-EXPORT_SYMBOL_GPL(pm8xxx_get_irq_wake_stat);
-
-int pm8xxx_get_irq_base(struct pm_irq_chip *chip)
-{
-
-	if (chip == NULL)
-		return -EINVAL;
-
-	return chip->irq_base;
-}
-EXPORT_SYMBOL_GPL(pm8xxx_get_irq_base);
-
 struct pm_irq_chip *  __devinit pm8xxx_irq_init(struct device *dev,
 				const struct pm8xxx_irq_platform_data *pdata)
 {
@@ -475,9 +413,6 @@ struct pm_irq_chip *  __devinit pm8xxx_irq_init(struct device *dev,
 		pr_err("Cannot alloc pm_irq_chip struct\n");
 		return ERR_PTR(-EINVAL);
 	}
-
-	memset((void*)&pm8xxx_wake_state.wake_enable[0],0,sizeof(u8)*MAX_PM_IRQ);
-        pm8xxx_wake_state.count_wakeable = 0;
 
 	chip->dev = dev;
 	chip->devirq = devirq;

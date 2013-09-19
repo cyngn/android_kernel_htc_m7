@@ -1,4 +1,4 @@
-/* Copyright (c) 2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -31,7 +31,7 @@ void diag_smux_event(void *priv, int event_type, const void *metadata)
 		pr_info("diag: SMUX_CONNECTED received\n");
 		driver->smux_connected = 1;
 		driver->in_busy_smux = 0;
-		
+		/* read data from USB MDM channel & Initiate first write */
 		queue_work(diag_bridge[SMUX].wq,
 			   &diag_bridge[SMUX].diag_read_work);
 		break;
@@ -54,7 +54,6 @@ void diag_smux_event(void *priv, int event_type, const void *metadata)
 		len = ((struct smux_meta_read *)metadata)->len;
 		rx_buf = ((struct smux_meta_read *)metadata)->buffer;
 		driver->write_ptr_mdm->length = len;
-		DIAGFWD_9K_RAWDATA(driver->buf_in_smux, "SMUX", DIAG_DBG_READ);
 		diag_device_write(driver->buf_in_smux, SMUX_DATA,
 						 driver->write_ptr_mdm);
 		break;
@@ -77,10 +76,6 @@ int diagfwd_read_complete_smux(void)
 int diag_get_rx_buffer(void *priv, void **pkt_priv, void **buffer, int size)
 {
 	if (!driver->in_busy_smux) {
-		if (!driver->smux_connected) {
-			pr_err("diag: received data in disconnect\n");
-			return -EINVAL;
-		}
 		*pkt_priv = (void *)0x1234;
 		*buffer = driver->buf_in_smux;
 		pr_debug("diag: set in_busy_smux as 1\n");
@@ -156,7 +151,7 @@ int diagfwd_connect_smux(void)
 			return ret;
 		}
 	}
-	
+	/* Poll USB channel to check for data*/
 	queue_work(diag_bridge[SMUX].wq, &(diag_bridge[SMUX].diag_read_work));
 	return ret;
 }
@@ -173,6 +168,12 @@ static int diagfwd_smux_probe(struct platform_device *pdev)
 		if (driver->buf_in_smux == NULL)
 			goto err;
 	}
+	/* Only required for Local loopback test
+	 * ret = msm_smux_set_ch_option(LCID_VALID,
+				 SMUX_CH_OPTION_LOCAL_LOOPBACK, 0);
+	 * if (ret)
+	 *	pr_err("diag: error setting SMUX ch option, r = %d\n", ret);
+	 */
 	if (driver->write_ptr_mdm == NULL)
 		driver->write_ptr_mdm = kzalloc(sizeof(struct diag_request),
 								 GFP_KERNEL);
@@ -195,8 +196,6 @@ static int diagfwd_smux_remove(struct platform_device *pdev)
 	driver->in_busy_smux = 1;
 	kfree(driver->buf_in_smux);
 	driver->buf_in_smux = NULL;
-
-	pr_info("diag: SMUX removed\n");
 	return 0;
 }
 

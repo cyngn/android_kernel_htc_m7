@@ -191,7 +191,7 @@ static int i2c_syn_read(struct i2c_client *client, uint16_t addr, uint8_t *data,
 	for (retry = 0; retry < SYN_I2C_RETRY_TIMES; retry++) {
 		if (i2c_transfer(client->adapter, msg, 2) == 2)
 			break;
-		hr_msleep(10);
+		msleep_interruptible(10);
 	}
 	mutex_unlock(&syn_mutex);
 
@@ -265,7 +265,7 @@ int i2c_rmi_read(uint16_t addr, uint8_t *data, uint16_t length)
 	for (retry = 0; retry < SYN_I2C_RETRY_TIMES; retry++) {
 		if (i2c_transfer(ts->client->adapter, msg, 2) == 2)
 			break;
-		hr_msleep(10);
+		msleep_interruptible(10);
 	}
 	mutex_unlock(&syn_mutex);
 
@@ -335,7 +335,7 @@ static int i2c_syn_error_handler(struct synaptics_ts_data *ts, uint8_t reset, ch
 			ret = ts->power(0);
 			if (ret < 0)
 				printk(KERN_ERR "[TP] TOUCH_ERR: synaptics i2c error handler power off failed\n");
-			hr_msleep(10);
+			msleep_interruptible(10);
 			ret = ts->power(1);
 			if (ret < 0)
 				printk(KERN_ERR "[TP] TOUCH_ERR: synaptics i2c error handler power on failed\n");
@@ -344,7 +344,7 @@ static int i2c_syn_error_handler(struct synaptics_ts_data *ts, uint8_t reset, ch
 				printk(KERN_ERR "[TP] TOUCH_ERR: synaptics i2c error handler init panel failed\n");
 		} else if (ts->gpio_reset) {
 			gpio_direction_output(ts->gpio_reset, 0);
-			hr_msleep(1);
+			msleep_interruptible(1);
 			gpio_direction_output(ts->gpio_reset, 1);
 			printk(KERN_INFO "[TP] %s: synaptics touch chip reseted.\n", __func__);
 		}
@@ -409,7 +409,7 @@ static int wait_flash_interrupt(struct synaptics_ts_data *ts, int attr, int fw)
 		if (fw)
 			mdelay(2);
 		else
-			hr_msleep(2);
+			msleep_interruptible(2);
 	}
 
 	if (i == 5000 && syn_panel_version == 0) {
@@ -506,7 +506,7 @@ static int disable_flash_programming(struct synaptics_ts_data *ts, int status)
 		if ((data & 0x40) == 0)
 			break;
 		else
-			hr_msleep(20);
+			msleep_interruptible(20);
 	}
 
 	if (i == 25) {
@@ -645,7 +645,7 @@ static int syn_firmware_update(struct synaptics_ts_data *ts)
 					printk(KERN_INFO "[TP][FW] Enable flash ok\n");
 					break;
 				}
-				hr_msleep(20);
+				msleep_interruptible(20);
 			}
 			if (i == 5) {
 				printk(KERN_ERR "[TP][FW] TOUCH_ERR: syn_eanbl_flash retry 5 time Faile\n");
@@ -1669,7 +1669,7 @@ static ssize_t syn_reset(struct device *dev,
 
 	if (buf[0] == '1' && ts->gpio_reset) {
 		gpio_direction_output(ts->gpio_reset, 0);
-		hr_msleep(1);
+		msleep_interruptible(1);
 		gpio_direction_output(ts->gpio_reset, 1);
 		printk(KERN_INFO "[TP] %s: synaptics touch chip reseted.\n", __func__);
 	}
@@ -3011,7 +3011,7 @@ static int syn_probe_init(void *arg)
 			goto err_init_failed;
 		}
 		if (data & 0x44) {
-			hr_msleep(20);
+			msleep_interruptible(20);
 #ifdef SYN_FLASH_PROGRAMMING_LOG
 			printk(KERN_INFO "[TP] synaptics probe: F01_data: %x touch controller stay in bootloader mode!\n", data);
 #endif
@@ -3635,7 +3635,7 @@ static int synaptics_ts_resume(struct i2c_client *client)
 
 	if (ts->power) {
 		ts->power(1);
-		hr_msleep(100);
+		msleep_interruptible(100);
 #ifdef SYN_CABLE_CONTROL
 		if (ts->cable_support) {
 			if (usb_get_connect_type())

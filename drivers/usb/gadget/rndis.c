@@ -585,12 +585,12 @@ static int rndis_init_response(int configNr, rndis_init_msg_type *buf)
 	resp->MinorVersion = cpu_to_le32(RNDIS_MINOR_VERSION);
 	resp->DeviceFlags = cpu_to_le32(RNDIS_DF_CONNECTIONLESS);
 	resp->Medium = cpu_to_le32(RNDIS_MEDIUM_802_3);
-	resp->MaxPacketsPerTransfer = cpu_to_le32(TX_SKB_HOLD_THRESHOLD);
-	resp->MaxTransferSize = cpu_to_le32(TX_SKB_HOLD_THRESHOLD *
-		(params->dev->mtu
+	resp->MaxPacketsPerTransfer = cpu_to_le32(params->max_pkt_per_xfer);
+	resp->MaxTransferSize = cpu_to_le32(
+		  params->dev->mtu
 		+ sizeof(struct ethhdr)
 		+ sizeof(struct rndis_packet_msg_type)
-		+ 22));
+		+ 22);
 	resp->PacketAlignmentFactor = cpu_to_le32(0);
 	resp->AFListOffset = cpu_to_le32(0);
 	resp->AFListSize = cpu_to_le32(0);
@@ -902,6 +902,7 @@ int rndis_register(void (*resp_avail)(void *v), void *v)
 			rndis_per_dev_params[i].used = 1;
 			rndis_per_dev_params[i].resp_avail = resp_avail;
 			rndis_per_dev_params[i].v = v;
+			rndis_per_dev_params[i].max_pkt_per_xfer = 1;
 			pr_debug("%s: configNr = %d\n", __func__, i);
 			return i;
 		}
@@ -953,6 +954,13 @@ int rndis_set_param_medium(u8 configNr, u32 medium, u32 speed)
 	rndis_per_dev_params[configNr].speed = speed;
 
 	return 0;
+}
+
+void rndis_set_max_pkt_xfer(u8 configNr, u8 max_pkt_per_xfer)
+{
+	pr_debug("%s:\n", __func__);
+
+	rndis_per_dev_params[configNr].max_pkt_per_xfer = max_pkt_per_xfer;
 }
 
 void rndis_add_hdr(struct sk_buff *skb)

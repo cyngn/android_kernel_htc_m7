@@ -423,12 +423,6 @@ config INPUT_GPIO
 	help
 	  Say Y here if you want to support gpio based keys, wheels etc...
 
-config PWRKEY_STATUS_API
-	bool "PWRKEY API"
-	depends on INPUT_GPIO
-	help
-	  Power key status API for others to get power key pressed or not within 1 second
-
 config INPUT_ISA1200_FF_MEMLESS
 	tristate "ISA1200 haptic ff-memless support"
 	depends on I2C
@@ -653,37 +647,31 @@ config BOSCH_BMA150
           If you say yes here you get support for Bosch Sensortec's
           acceleration sensors SMB380/BMA150.
 
-config INPUT_DUMMY_KEYPAD
-       tristate "Dummy Keypad driver support"
+config STM_LIS3DH
+        tristate "STM LIS3DH acceleration sensor support"
+        depends on I2C=y
+        help
+          If you say yes here you get support for STMicroelectronics's
+          acceleration sensors LIS3DH.
+
+config BMP18X
+       tristate "BMP18X digital pressure sensor"
+       depends on (I2C ) && SYSFS
        help
-         Say Y here if you want to support dummy keypad driver, wheels etc...
+         If you say yes here you get support for Bosch Sensortec
+	 digital pressure sensors BMP085, BMP180.
 
-config POWER_KEY_LED
-	tristate "Power key LED"
-	help
-	  Say Y here if you want to support power key LED.
+         To compile this driver as a module, choose M here: the
+         module will be called bmp18x-core.
 
-config POWER_KEY_CLR_RESET
-	tristate "Power key clear reset"
-	help
-	  Say Y here if you want to support power key LED.
+config BMP18X_I2C
+       tristate "support I2C bus connection"
+       depends on BMP18X && I2C
+       help
+         Say Y here if you want to support Bosch Sensortec digital pressure
+         sensor hooked to an I2C bus.
 
-config PWRKEY_WAKESRC_LOG
-	tristate "Power key wake up source log"
-	default n
-	help
-	  Say Y here if you want to check power key wake up source log.
+         To compile this driver as a module, choose M here: the
+         module will be called bmp18x-i2c.
 
-config INPUT_FPC1080
-       default n
-       tristate "FPC1080 fingerprint sensor support"
-       depends on SPI_MASTER
-
-config FPC1080_NAVIGATION
-       tristate "FPC1080 fingerprint sensor navigation support"
-       depends on INPUT_FPC1080
-
-config FPC1080_MOUSE
-       tristate "FPC1080 fingerprint sensor mouse support"
-       depends on INPUT_FPC1080
 endif

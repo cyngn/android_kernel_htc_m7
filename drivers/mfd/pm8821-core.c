@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -23,11 +23,14 @@
 #include <linux/mfd/pm8xxx/pm8821.h>
 #include <linux/mfd/pm8xxx/core.h>
 
-#define REG_HWREV		0x002  
-#define REG_HWREV_2		0x0E8  
+#define REG_HWREV		0x002  /* PMIC4 revision */
+#define REG_HWREV_2		0x0E8  /* PMIC4 revision 2 */
 
 #define REG_MPP_BASE		0x050
 #define REG_IRQ_BASE		0x100
+
+#define REG_TEMP_ALARM_CTRL	0x01B
+#define REG_TEMP_ALARM_PWM	0x09B
 
 #define PM8821_VERSION_MASK	0xFFF0
 #define PM8821_VERSION_VALUE	0x0BF0
@@ -142,6 +145,29 @@ static struct mfd_cell debugfs_cell __devinitdata = {
 	.pdata_size	= sizeof("pm8821-dbg"),
 };
 
+static const struct resource thermal_alarm_cell_resources[] __devinitconst = {
+	SINGLE_IRQ_RESOURCE("pm8821_tempstat_irq", PM8821_TEMPSTAT_IRQ),
+	SINGLE_IRQ_RESOURCE("pm8821_overtemp_irq", PM8821_OVERTEMP_IRQ),
+};
+
+static struct pm8xxx_tm_core_data thermal_alarm_cdata = {
+	.adc_type			= PM8XXX_TM_ADC_NONE,
+	.reg_addr_temp_alarm_ctrl	= REG_TEMP_ALARM_CTRL,
+	.reg_addr_temp_alarm_pwm	= REG_TEMP_ALARM_PWM,
+	.tm_name			= "pm8821_tz",
+	.irq_name_temp_stat		= "pm8821_tempstat_irq",
+	.irq_name_over_temp		= "pm8821_overtemp_irq",
+	.default_no_adc_temp		= 37000,
+};
+
+static struct mfd_cell thermal_alarm_cell __devinitdata = {
+	.name		= PM8XXX_TM_DEV_NAME,
+	.id		= 1,
+	.resources	= thermal_alarm_cell_resources,
+	.num_resources	= ARRAY_SIZE(thermal_alarm_cell_resources),
+	.platform_data	= &thermal_alarm_cdata,
+	.pdata_size	= sizeof(struct pm8xxx_tm_core_data),
+};
 
 static int __devinit
 pm8821_add_subdevices(const struct pm8821_platform_data *pdata,
@@ -183,6 +209,14 @@ pm8821_add_subdevices(const struct pm8821_platform_data *pdata,
 		goto bail;
 	}
 
+	ret = mfd_add_devices(pmic->dev, 0, &thermal_alarm_cell, 1, NULL,
+				irq_base);
+	if (ret) {
+		pr_err("Failed to add thermal alarm subdevice ret=%d\n",
+			ret);
+		goto bail;
+	}
+
 	return 0;
 bail:
 	if (pmic->irq_chip) {
@@ -220,7 +254,7 @@ static int __devinit pm8821_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-	
+	/* Read PMIC chip revision */
 	rc = msm_ssbi_read(pdev->dev.parent, REG_HWREV, &val, sizeof(val));
 	if (rc) {
 		pr_err("Failed to read hw rev reg %d:rc=%d\n", REG_HWREV, rc);
@@ -229,7 +263,7 @@ static int __devinit pm8821_probe(struct platform_device *pdev)
 	pr_info("PMIC revision 1: PM8821 rev %02X\n", val);
 	pmic->rev_registers = val;
 
-	
+	/* Read PMIC chip revision 2 */
 	rc = msm_ssbi_read(pdev->dev.parent, REG_HWREV_2, &val, sizeof(val));
 	if (rc) {
 		pr_err("Failed to read hw rev 2 reg %d:rc=%d\n",
@@ -243,7 +277,7 @@ static int __devinit pm8821_probe(struct platform_device *pdev)
 	pm8821_drvdata.pm_chip_data = pmic;
 	platform_set_drvdata(pdev, &pm8821_drvdata);
 
-	
+	/* Print out human readable version and revision names. */
 	version = pm8xxx_get_version(pmic->dev);
 	if (version == PM8XXX_VERSION_8821) {
 		revision = pm8xxx_get_revision(pmic->dev);

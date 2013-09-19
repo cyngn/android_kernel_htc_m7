@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -23,7 +23,6 @@
 #include <linux/hwmon.h>
 #include <linux/module.h>
 #include <linux/debugfs.h>
-#include <linux/wakelock.h>
 #include <linux/interrupt.h>
 #include <linux/completion.h>
 #include <linux/hwmon-sysfs.h>
@@ -32,7 +31,9 @@
 #include <linux/mfd/pm8xxx/core.h>
 #include <linux/regulator/consumer.h>
 #include <linux/mfd/pm8xxx/pm8xxx-adc.h>
+#include <mach/msm_xo.h>
 
+/* User Bank register set */
 #define PM8XXX_ADC_ARB_USRP_CNTRL1			0x197
 #define PM8XXX_ADC_ARB_USRP_CNTRL1_EN_ARB		BIT(0)
 #define PM8XXX_ADC_ARB_USRP_CNTRL1_RSV1			BIT(1)
@@ -122,6 +123,7 @@
 #define PM8XXX_ADC_PA_THERM_VREG_UA_LOAD		100000
 #define PM8XXX_ADC_HWMON_NAME_LENGTH			32
 #define PM8XXX_ADC_BTM_INTERVAL_MAX			0x14
+#define PM8XXX_ADC_COMPLETION_TIMEOUT			(2 * HZ)
 
 struct pm8xxx_adc {
 	struct device				*dev;
@@ -140,10 +142,10 @@ struct pm8xxx_adc {
 	struct work_struct			cool_work;
 	uint32_t				mpp_base;
 	struct device				*hwmon;
-	struct wake_lock			adc_wakelock;
+	struct msm_xo_voter			*adc_voter;
 	int					msm_suspend_check;
 	struct pm8xxx_adc_amux_properties	*conv;
-	struct pm8xxx_adc_arb_btm_param		batt[0];
+	struct pm8xxx_adc_arb_btm_param		batt;
 	struct sensor_device_attribute		sens_attr[0];
 };
 
@@ -173,13 +175,23 @@ static struct pm8xxx_adc_scale_fn adc_scale_fn[] = {
 	[ADC_SCALE_XOTHERM] = {pm8xxx_adc_tdkntcg_therm},
 };
 
+/* On PM8921 ADC the MPP needs to first be configured
+as an analog input to the AMUX pre-mux channel before
+issuing a read request. PM8921 MPP 8 is mapped to AMUX8
+and is common between remote processor's.
+On PM8018 ADC the MPP is directly connected to the AMUX
+pre-mux. Therefore clients of the PM8018 MPP do not need
+to configure the MPP as an analog input to the pre-mux.
+Clients can directly issue request on the pre-mux AMUX
+channel to read the ADC on the MPP */
 static struct pm8xxx_mpp_config_data pm8xxx_adc_mpp_config = {
 	.type		= PM8XXX_MPP_TYPE_A_INPUT,
-	
+	/* AMUX6 is dedicated to be used for apps processor */
 	.level		= PM8XXX_MPP_AIN_AMUX_CH6,
 	.control	= PM8XXX_MPP_AOUT_CTRL_DISABLE,
 };
 
+/* MPP Configuration for default settings */
 static struct pm8xxx_mpp_config_data pm8xxx_adc_mpp_unconfig = {
 	.type		= PM8XXX_MPP_TYPE_SINK,
 	.level		= PM8XXX_MPP_AIN_AMUX_CH5,
@@ -212,9 +224,10 @@ static int32_t pm8xxx_adc_arb_cntrl(uint32_t arb_cntrl,
 			pr_err("PM8xxx ADC request made after suspend_noirq "
 					"with channel: %d\n", channel);
 		data_arb_cntrl |= PM8XXX_ADC_ARB_USRP_CNTRL1_EN_ARB;
-		wake_lock(&adc_pmic->adc_wakelock);
 	}
 
+	/* Write twice to the CNTRL register for the arbiter settings
+	   to take into effect */
 	for (i = 0; i < 2; i++) {
 		rc = pm8xxx_writeb(adc_pmic->dev->parent,
 				PM8XXX_ADC_ARB_USRP_CNTRL1, data_arb_cntrl);
@@ -229,8 +242,7 @@ static int32_t pm8xxx_adc_arb_cntrl(uint32_t arb_cntrl,
 		INIT_COMPLETION(adc_pmic->adc_rslt_completion);
 		rc = pm8xxx_writeb(adc_pmic->dev->parent,
 			PM8XXX_ADC_ARB_USRP_CNTRL1, data_arb_cntrl);
-	} else
-		wake_unlock(&adc_pmic->adc_wakelock);
+	}
 
 	return 0;
 }
@@ -280,14 +292,34 @@ static int32_t pm8xxx_adc_patherm_power(bool on)
 	return rc;
 }
 
+static int32_t pm8xxx_adc_xo_vote(bool on)
+{
+	struct pm8xxx_adc *adc_pmic = pmic_adc;
+
+	if (on)
+		msm_xo_mode_vote(adc_pmic->adc_voter, MSM_XO_MODE_ON);
+	else
+		msm_xo_mode_vote(adc_pmic->adc_voter, MSM_XO_MODE_OFF);
+
+	return 0;
+}
+
 static int32_t pm8xxx_adc_channel_power_enable(uint32_t channel,
 							bool power_cntrl)
 {
 	int rc = 0;
 
-	switch (channel)
+	switch (channel) {
 	case ADC_MPP_1_AMUX8:
 		rc = pm8xxx_adc_patherm_power(power_cntrl);
+		break;
+	case CHANNEL_DIE_TEMP:
+	case CHANNEL_MUXOFF:
+		rc = pm8xxx_adc_xo_vote(power_cntrl);
+		break;
+	default:
+		break;
+	}
 
 	return rc;
 }
@@ -358,8 +390,8 @@ static int32_t pm8xxx_adc_configure(
 	if (rc < 0)
 		return rc;
 
-	
-	
+	/* Default 2.4Mhz clock rate */
+	/* Client chooses the decimation */
 	switch (chan_prop->decimation) {
 	case ADC_DECIMATION_TYPE1:
 		data_dig_param |= PM8XXX_ADC_ARB_USRP_DIG_PARAM_DEC_RATE0;
@@ -414,12 +446,14 @@ static uint32_t pm8xxx_adc_read_adc_code(int32_t *data)
 
 	*data = (rslt_msb << 8) | rslt_lsb;
 
-	
+	/* Use the midpoint to determine underflow or overflow */
 	if (*data > max_ideal_adc_code + (max_ideal_adc_code >> 1))
 		*data |= ((1 << (8 * sizeof(*data) -
 			adc_pmic->adc_prop->bitresolution)) - 1) <<
 			adc_pmic->adc_prop->bitresolution;
 
+	/* Default value for switching off the arbiter after reading
+	   the ADC value. Bit 0 set to 0. */
 	rc = pm8xxx_adc_arb_cntrl(0, CHANNEL_NONE);
 	if (rc < 0) {
 		pr_err("%s: Configuring ADC Arbiter disable"
@@ -439,8 +473,8 @@ static void pm8xxx_adc_btm_warm_scheduler_fn(struct work_struct *work)
 
 	spin_lock_irqsave(&adc_pmic->btm_lock, flags);
 	warm_status = irq_read_line(adc_pmic->btm_warm_irq);
-	if (adc_pmic->batt->btm_warm_fn != NULL)
-		adc_pmic->batt->btm_warm_fn(warm_status);
+	if (adc_pmic->batt.btm_warm_fn != NULL)
+		adc_pmic->batt.btm_warm_fn(warm_status);
 	spin_unlock_irqrestore(&adc_pmic->btm_lock, flags);
 }
 
@@ -453,8 +487,8 @@ static void pm8xxx_adc_btm_cool_scheduler_fn(struct work_struct *work)
 
 	spin_lock_irqsave(&adc_pmic->btm_lock, flags);
 	cool_status = irq_read_line(adc_pmic->btm_cool_irq);
-	if (adc_pmic->batt->btm_cool_fn != NULL)
-		adc_pmic->batt->btm_cool_fn(cool_status);
+	if (adc_pmic->batt.btm_cool_fn != NULL)
+		adc_pmic->batt.btm_cool_fn(cool_status);
 	spin_unlock_irqrestore(&adc_pmic->btm_lock, flags);
 }
 
@@ -576,7 +610,7 @@ static uint32_t pm8xxx_adc_calib_device(void)
 					"failed\n", __func__);
 		return rc;
 	}
-	
+	/* Ratiometric Calibration */
 	conv.amux_channel = CHANNEL_MUXOFF;
 	conv.decimation = ADC_DECIMATION_TYPE2;
 	conv.amux_ip_rsv = AMUX_RSV5;
@@ -661,8 +695,6 @@ uint32_t pm8xxx_adc_read(enum pm8xxx_adc_channels channel,
 	struct pm8xxx_adc *adc_pmic = pmic_adc;
 	int i = 0, rc = 0, rc_fail, amux_prescaling, scale_type;
 	enum pm8xxx_adc_premux_mpp_scale_type mpp_scale;
-	u8 data_arb_usrp_cntrl1 = 0;
-	static int timeout_count = 0;
 
 	if (!pm8xxx_adc_initialized)
 		return -ENODEV;
@@ -721,20 +753,20 @@ uint32_t pm8xxx_adc_read(enum pm8xxx_adc_channels channel,
 		goto fail;
 	}
 
-	rc = wait_for_completion_timeout(&adc_pmic->adc_rslt_completion, HZ);
+	rc = wait_for_completion_timeout(&adc_pmic->adc_rslt_completion,
+						PM8XXX_ADC_COMPLETION_TIMEOUT);
 	if (!rc) {
+		u8 data_arb_usrp_cntrl1 = 0;
 		rc = pm8xxx_adc_read_reg(PM8XXX_ADC_ARB_USRP_CNTRL1,
-								&data_arb_usrp_cntrl1);
+					&data_arb_usrp_cntrl1);
 		if (rc < 0)
 			goto fail;
 		if (data_arb_usrp_cntrl1 == (PM8XXX_ADC_ARB_USRP_CNTRL1_EOC |
-							PM8XXX_ADC_ARB_USRP_CNTRL1_EN_ARB))
+					PM8XXX_ADC_ARB_USRP_CNTRL1_EN_ARB))
 			pr_debug("End of conversion status set\n");
 		else {
-			timeout_count++;
-			pr_err("%s: wait_for_completion_timeout:%d,ch=%d,(count=%d)",
-					__func__, rc, channel, timeout_count);
-			rc = -ETIMEDOUT;
+			pr_err("EOC interrupt not received\n");
+			rc = -EINVAL;
 			goto fail;
 		}
 	}
@@ -789,6 +821,14 @@ uint32_t pm8xxx_adc_mpp_config_read(uint32_t mpp_num,
 		pr_info("PM8xxx MPP base invalid with error %d\n", rc);
 		return rc;
 	}
+
+	if (mpp_num == PM8XXX_AMUX_MPP_8) {
+		rc = -EINVAL;
+		pr_info("PM8xxx MPP8 is already configured "
+			"to AMUX8. Use pm8xxx_adc_read() instead.\n");
+		return rc;
+	}
+
 	mutex_lock(&adc_pmic->mpp_adc_lock);
 
 	rc = pm8xxx_mpp_config(((mpp_num - 1) + adc_pmic->mpp_base),
@@ -867,7 +907,7 @@ uint32_t pm8xxx_adc_btm_configure(struct pm8xxx_adc_arb_btm_param *btm_param)
 		if (rc < 0)
 			goto write_err;
 
-		adc_pmic->batt->btm_cool_fn = btm_param->btm_cool_fn;
+		adc_pmic->batt.btm_cool_fn = btm_param->btm_cool_fn;
 	}
 
 	if (btm_param->btm_warm_fn != NULL) {
@@ -881,7 +921,7 @@ uint32_t pm8xxx_adc_btm_configure(struct pm8xxx_adc_arb_btm_param *btm_param)
 		if (rc < 0)
 			goto write_err;
 
-		adc_pmic->batt->btm_warm_fn = btm_param->btm_warm_fn;
+		adc_pmic->batt.btm_warm_fn = btm_param->btm_warm_fn;
 	}
 
 	rc = pm8xxx_adc_read_reg(PM8XXX_ADC_ARB_BTM_CNTRL1, &arb_btm_cntrl1);
@@ -959,10 +999,10 @@ static uint32_t pm8xxx_adc_btm_read(uint32_t channel)
 	if (rc < 0)
 		goto write_err;
 
-	if (pmic_adc->batt->btm_warm_fn != NULL)
+	if (pmic_adc->batt.btm_warm_fn != NULL)
 		enable_irq(adc_pmic->btm_warm_irq);
 
-	if (pmic_adc->batt->btm_cool_fn != NULL)
+	if (pmic_adc->batt.btm_cool_fn != NULL)
 		enable_irq(adc_pmic->btm_cool_irq);
 
 write_err:
@@ -988,6 +1028,8 @@ uint32_t pm8xxx_adc_btm_end(void)
 
 	spin_lock_irqsave(&adc_pmic->btm_lock, flags);
 
+	/* Write twice to the CNTRL register for the arbiter settings
+	   to take into effect */
 	for (i = 0; i < 2; i++) {
 		rc = pm8xxx_adc_write_reg(PM8XXX_ADC_ARB_BTM_CNTRL1,
 							data_arb_btm_cntrl);
@@ -1002,34 +1044,6 @@ uint32_t pm8xxx_adc_btm_end(void)
 	return rc;
 }
 EXPORT_SYMBOL_GPL(pm8xxx_adc_btm_end);
-
-int pm8xxx_adc_btm_is_cool(void)
-{
-	if (pmic_adc == NULL) {
-		pr_err("PMIC ADC not valid\n");
-		return 0;
-	}
-	if (pmic_adc->batt->btm_cool_fn == NULL) {
-		return 0;
-	}
-
-	return irq_read_line(pmic_adc->btm_cool_irq);
-}
-EXPORT_SYMBOL_GPL(pm8xxx_adc_btm_is_cool);
-
-int pm8xxx_adc_btm_is_warm(void)
-{
-	if (pmic_adc == NULL) {
-		pr_err("PMIC ADC not valid\n");
-		return 0;
-	}
-	if (pmic_adc->batt->btm_warm_fn == NULL) {
-		return 0;
-	}
-
-	return irq_read_line(pmic_adc->btm_warm_irq);
-}
-EXPORT_SYMBOL_GPL(pm8xxx_adc_btm_is_warm);
 
 static ssize_t pm8xxx_adc_show(struct device *dev,
 			struct device_attribute *devattr, char *buf)
@@ -1155,7 +1169,7 @@ static int __devexit pm8xxx_adc_teardown(struct platform_device *pdev)
 	struct pm8xxx_adc *adc_pmic = pmic_adc;
 	int i;
 
-	wake_lock_destroy(&adc_pmic->adc_wakelock);
+	msm_xo_put(adc_pmic->adc_voter);
 	platform_set_drvdata(pdev, NULL);
 	pmic_adc = NULL;
 	if (!pa_therm) {
@@ -1183,7 +1197,6 @@ static int __devinit pm8xxx_adc_probe(struct platform_device *pdev)
 	}
 
 	adc_pmic = devm_kzalloc(&pdev->dev, sizeof(struct pm8xxx_adc) +
-			sizeof(struct pm8xxx_adc_arb_btm_param) +
 			(sizeof(struct sensor_device_attribute) *
 			pdata->adc_num_board_channel), GFP_KERNEL);
 	if (!adc_pmic) {
@@ -1207,11 +1220,6 @@ static int __devinit pm8xxx_adc_probe(struct platform_device *pdev)
 	adc_pmic->adc_channel = pdata->adc_channel;
 	adc_pmic->adc_num_board_channel = pdata->adc_num_board_channel;
 	adc_pmic->mpp_base = pdata->adc_mpp_base;
-
-	if (pdata->adc_map_btm_table)
-		pm8xxx_adc_set_adcmap_btm_table(pdata->adc_map_btm_table);
-	else
-		pr_warn("default adcmap_btm_table is applied.\n");
 
 	mutex_init(&adc_pmic->adc_lock);
 	mutex_init(&adc_pmic->mpp_adc_lock);
@@ -1263,8 +1271,6 @@ static int __devinit pm8xxx_adc_probe(struct platform_device *pdev)
 
 	disable_irq_nosync(adc_pmic->btm_cool_irq);
 	platform_set_drvdata(pdev, adc_pmic);
-	wake_lock_init(&adc_pmic->adc_wakelock, WAKE_LOCK_SUSPEND,
-					"pm8xxx_adc_wakelock");
 	adc_pmic->msm_suspend_check = 0;
 	pmic_adc = adc_pmic;
 
@@ -1282,15 +1288,20 @@ static int __devinit pm8xxx_adc_probe(struct platform_device *pdev)
 	}
 	adc_pmic->hwmon = hwmon_device_register(adc_pmic->dev);
 
+	if (adc_pmic->adc_voter == NULL) {
+		adc_pmic->adc_voter = msm_xo_get(MSM_XO_TCXO_D0, "pmic_xoadc");
+		if (IS_ERR(adc_pmic->adc_voter)) {
+			dev_err(&pdev->dev, "Failed to get XO vote\n");
+			return PTR_ERR(adc_pmic->adc_voter);
+		}
+	}
+
 	pa_therm = regulator_get(adc_pmic->dev, "pa_therm");
 	if (IS_ERR(pa_therm)) {
 		rc = PTR_ERR(pa_therm);
 		pr_err("failed to request pa_therm vreg with error %d\n", rc);
 		pa_therm = NULL;
 	}
-	if (pdata->pm8xxx_adc_device_register)
-		pdata->pm8xxx_adc_device_register();
-
 	return 0;
 }
 

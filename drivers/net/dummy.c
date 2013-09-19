@@ -52,6 +52,7 @@ static int dummy_set_address(struct net_device *dev, void *p)
 	return 0;
 }
 
+/* fake multicast ability */
 static void set_multicast_list(struct net_device *dev)
 {
 }
@@ -125,11 +126,11 @@ static void dummy_setup(struct net_device *dev)
 {
 	ether_setup(dev);
 
-	
+	/* Initialize the device structure. */
 	dev->netdev_ops = &dummy_netdev_ops;
 	dev->destructor = free_netdev;
 
-	
+	/* Fill in device structure with ethernet-generic values. */
 	dev->tx_queue_len = 0;
 	dev->flags |= IFF_NOARP;
 	dev->flags &= ~IFF_MULTICAST;
@@ -155,6 +156,7 @@ static struct rtnl_link_ops dummy_link_ops __read_mostly = {
 	.validate	= dummy_validate,
 };
 
+/* Number of dummy devices to be set up by this module. */
 module_param(numdummies, int, 0);
 MODULE_PARM_DESC(numdummies, "Number of dummy pseudo devices");
 
@@ -185,10 +187,8 @@ static int __init dummy_init_module(void)
 	rtnl_lock();
 	err = __rtnl_link_register(&dummy_link_ops);
 
-	for (i = 0; i < numdummies && !err; i++) {
+	for (i = 0; i < numdummies && !err; i++)
 		err = dummy_init_one();
-		cond_resched();
-	}
 	if (err < 0)
 		__rtnl_link_unregister(&dummy_link_ops);
 	rtnl_unlock();

@@ -18,7 +18,7 @@
 #include <linux/platform_device.h>
 #include <linux/errno.h>
 #include <linux/mfd/pm8xxx/pm8921-bms.h>
-#include <linux/mfd/pm8xxx/pm8921-charger.h>
+#include <linux/mfd/pm8xxx/pm8921-charger-htc.h>
 #include <linux/mfd/pm8xxx/core.h>
 #include <linux/mfd/pm8xxx/pm8xxx-adc.h>
 #include <linux/mfd/pm8xxx/ccadc.h>

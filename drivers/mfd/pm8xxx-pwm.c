@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -8,6 +8,11 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ */
+/*
+ * Qualcomm PM8XXX Pulse Width Modulation (PWM) driver
+ *
+ * The HW module is also called LPG (Light Pulse Generator).
  */
 
 #define pr_fmt(fmt) "%s: " fmt, __func__
@@ -22,10 +27,17 @@
 
 #define PM8XXX_PWM_CHANNELS		3
 
+/*
+ * For the lack of better term to distinguish functional
+ * differences, hereby, LPG version 0 (V0, v0) denotes
+ * PM8058/8921, and version 1 (V1, v1) denotes
+ * PM8922/8038.
+ */
 #define PM8XXX_LPG_V0_PWM_CHANNELS	8
 #define PM8XXX_LPG_V1_PWM_CHANNELS	6
 #define PM8XXX_LPG_CTL_REGS		7
 
+/* PM8XXX PWM */
 #define SSBI_REG_ADDR_PWM1_CTRL1	0x88
 #define SSBI_REG_ADDR_PWM1_CTRL2	0x89
 #define SSBI_REG_ADDR_PWM_CTL(id, base) (id == 0 ? base : (base + (id << 1)))
@@ -45,14 +57,17 @@
 #define PM8XXX_PWM_VALUE_BIT0		0x01
 #define PM8XXX_PWM_DISABLE		0x3F
 
+/* PM8XXX LPG PWM */
+#define SSBI_REG_ADDR_LPG_BANK_LOW_EN	0x130
 #define SSBI_REG_ADDR_LPG_CTL_BASE	0x13C
 #define SSBI_REG_ADDR_LPG_CTL(n)	(SSBI_REG_ADDR_LPG_CTL_BASE + (n))
 #define SSBI_REG_ADDR_LPG_BANK_SEL	0x143
-#define SSBI_REG_ADDR_LPG_BANK_EN	0x144
+#define SSBI_REG_ADDR_LPG_BANK_HIGH_EN	0x144
 #define SSBI_REG_ADDR_LPG_LUT_CFG0	0x145
 #define SSBI_REG_ADDR_LPG_LUT_CFG1	0x146
 #define SSBI_REG_ADDR_LPG_TEST		0x147
 
+/* LPG Control 0 */
 #define PM8XXX_PWM_1KHZ_COUNT_MASK	0xF0
 #define PM8XXX_PWM_1KHZ_COUNT_SHIFT	4
 
@@ -68,17 +83,21 @@
 #define PM8XXX_PWM_RAMP_GEN_START	(PM8XXX_PWM_RAMP_GEN_EN \
 					| PM8XXX_PWM_RAMP_START)
 
+/* LPG Control 1 */
 #define PM8XXX_PWM_REVERSE_EN		0x80
 #define PM8XXX_PWM_BYPASS_LUT		0x40
 #define PM8XXX_PWM_HIGH_INDEX_MASK	0x3F
 
+/* LPG Control 2 */
 #define PM8XXX_PWM_LOOP_EN		0x80
 #define PM8XXX_PWM_RAMP_UP		0x40
 #define PM8XXX_PWM_LOW_INDEX_MASK	0x3F
 
+/* LPG Control 3 */
 #define PM8XXX_PWM_VALUE_BIT7_0		0xFF
 #define PM8XXX_PWM_VALUE_BIT5_0		0x3F
 
+/* LPG Control 4 */
 #define PM8XXX_PWM_VALUE_BIT8		0x80
 
 #define PM8XXX_LPG_PWM_CLK_SEL_MASK	0x60
@@ -101,26 +120,41 @@
 #define PM8XXX_PWM_M_MIN		0
 #define PM8XXX_PWM_M_MAX		7
 
+/* LPG Control 5 */
 #define PM8XXX_PWM_PAUSE_COUNT_HI_MASK		0xFC
 #define PM8XXX_PWM_PAUSE_COUNT_HI_SHIFT		2
 
 #define PM8XXX_PWM_PAUSE_ENABLE_HIGH		0x02
 #define PM8XXX_PWM_SIZE_9_BIT			0x01
 
+/* LPG Control 6 */
 #define PM8XXX_PWM_PAUSE_COUNT_LO_MASK		0xFC
 #define PM8XXX_PWM_PAUSE_COUNT_LO_SHIFT		2
 
 #define PM8XXX_PWM_PAUSE_ENABLE_LOW		0x02
 #define PM8XXX_PWM_RESERVED			0x01
 
-#define PM8XXX_PWM_PAUSE_COUNT_MAX		56 
+#define PM8XXX_PWM_PAUSE_COUNT_MAX		56 /* < 2^6 = 64 */
 
+/* LPG LUT_CFG1 */
 #define PM8XXX_PWM_LUT_READ			0x40
 
+/* TEST */
 #define PM8XXX_PWM_DTEST_MASK		0x38
 #define PM8XXX_PWM_DTEST_SHIFT		3
 #define PM8XXX_PWM_DTEST_BANK_MASK	0x07
 
+/*
+ * PWM Frequency = Clock Frequency / (N * T)
+ *	or
+ * PWM Period = Clock Period * (N * T)
+ *	where
+ * N = 2^9 or 2^6 for 9-bit or 6-bit PWM size
+ * T = Pre-divide * 2^m, where m = 0..7 (exponent)
+ *
+ * This is the formula to figure out m for the best pre-divide and clock:
+ * (PWM Period / N) = (Pre-divide * Clock Period) * 2^m
+ */
 #define NUM_CLOCKS	3
 
 #define NSEC_1024HZ	(NSEC_PER_SEC / 1024)
@@ -130,7 +164,7 @@
 #define NUM_LPG_PRE_DIVIDE	4
 #define NUM_PWM_PRE_DIVIDE	2
 
-#define PRE_DIVIDE_1		1	
+#define PRE_DIVIDE_1		1	/* v1 */
 #define PRE_DIVIDE_2		2
 #define PRE_DIVIDE_3		3
 #define PRE_DIVIDE_5		5
@@ -155,10 +189,11 @@ static unsigned int pt_t[NUM_LPG_PRE_DIVIDE][NUM_CLOCKS] = {
 	},
 };
 
+/* Private data */
 struct pm8xxx_pwm_chip;
 
 struct pwm_device {
-	int			pwm_id;		
+	int			pwm_id;		/* = bank/channel id */
 	int			in_use;
 	const char		*label;
 	struct pm8xxx_pwm_period	period;
@@ -172,13 +207,15 @@ struct pwm_device {
 	struct pm8xxx_pwm_chip	*chip;
 	int			bypass_lut;
 	int			dtest_mode_supported;
+	int			banks;
 };
 
 struct pm8xxx_pwm_chip {
 	struct pwm_device		*pwm_dev;
 	u8				pwm_channels;
 	u8				pwm_total_pre_divs;
-	u8				bank_mask;
+	u8				lo_bank_mask;
+	u8				hi_bank_mask;
 	struct mutex			pwm_mutex;
 	struct device			*dev;
 	bool				is_lpg_supported;
@@ -187,7 +224,7 @@ struct pm8xxx_pwm_chip {
 static struct pm8xxx_pwm_chip	*pwm_chip;
 
 struct pm8xxx_pwm_lut {
-	
+	/* LUT parameters */
 	int	lut_duty_ms;
 	int	lut_lo_index;
 	int	lut_hi_index;
@@ -209,6 +246,7 @@ static const u16 pause_count[PM8XXX_PWM_PAUSE_COUNT_MAX + 1] = {
 	7000
 };
 
+/* Internal functions */
 static void pm8xxx_pwm_save(u8 *u8p, u8 mask, u8 val)
 {
 	*u8p &= ~mask;
@@ -223,17 +261,42 @@ static int pm8xxx_pwm_bank_enable(struct pwm_device *pwm, int enable)
 
 	chip = pwm->chip;
 
-	if (enable)
-		reg = chip->bank_mask | (1 << pwm->pwm_id);
-	else
-		reg = chip->bank_mask & ~(1 << pwm->pwm_id);
+	if (!pwm->banks)
+		pwm->banks = (PM_PWM_BANK_LO | PM_PWM_BANK_HI);
 
-	rc = pm8xxx_writeb(chip->dev->parent, SSBI_REG_ADDR_LPG_BANK_EN, reg);
-	if (rc) {
-		pr_err("pm8xxx_writeb(): rc=%d (Enable LPG Bank)\n", rc);
-		return rc;
+	if (pwm->banks & PM_PWM_BANK_LO) {
+		if (enable)
+			reg = chip->lo_bank_mask | (1 << pwm->pwm_id);
+		else
+			reg = chip->lo_bank_mask & ~(1 << pwm->pwm_id);
+
+		rc = pm8xxx_writeb(chip->dev->parent,
+				SSBI_REG_ADDR_LPG_BANK_LOW_EN, reg);
+
+		if (rc) {
+			pr_err("pm8xxx_writeb(): Enable Bank Low =%d\n", rc);
+			return rc;
+		}
+
+		chip->lo_bank_mask = reg;
 	}
-	chip->bank_mask = reg;
+
+	if (pwm->banks & PM_PWM_BANK_HI) {
+		if (enable)
+			reg = chip->hi_bank_mask | (1 << pwm->pwm_id);
+		else
+			reg = chip->hi_bank_mask & ~(1 << pwm->pwm_id);
+
+		rc = pm8xxx_writeb(chip->dev->parent,
+			SSBI_REG_ADDR_LPG_BANK_HIGH_EN, reg);
+
+		if (rc) {
+			pr_err("pm8xxx_writeb(): Enable Bank High =%d\n", rc);
+			return rc;
+		}
+
+		chip->hi_bank_mask = reg;
+	}
 
 	return 0;
 }
@@ -292,6 +355,10 @@ static int pm8xxx_pwm_disable(struct pwm_device *pwm)
 
 static int pm8xxx_pwm_enable(struct pwm_device *pwm)
 {
+	/**
+	 * A kind of best Effort: Just write the clock information that
+	 * we have in the register.
+	 */
 	int	rc;
 
 	rc = pm8xxx_writeb(pwm->chip->dev->parent,
@@ -311,7 +378,7 @@ static void pm8xxx_pwm_calc_period(unsigned int period_us,
 	unsigned int	last_err, cur_err, min_err;
 	unsigned int	tmp_p, period_n;
 
-	
+	/* PWM Period / N */
 	if (period_us < ((unsigned)(-1) / NSEC_PER_USEC)) {
 		period_n = (period_us * NSEC_PER_USEC) >> 6;
 		n = 6;
@@ -326,8 +393,8 @@ static void pm8xxx_pwm_calc_period(unsigned int period_us,
 	best_div = 0;
 	for (clk = 0; clk < NUM_CLOCKS; clk++) {
 		for (div = 0; div < pwm_chip->pwm_total_pre_divs; div++) {
-			
-			
+			/* period_n = (PWM Period / N) */
+			/* tmp_p = (Pre-divide * Clock Period) * 2^m */
 			tmp_p = pt_t[div][clk];
 			for (m = 0; m <= PM8XXX_PWM_M_MAX; m++) {
 				if (period_n > tmp_p)
@@ -343,7 +410,7 @@ static void pm8xxx_pwm_calc_period(unsigned int period_us,
 				}
 
 				if (m && cur_err > last_err)
-					
+					/* Break for bigger cur_err */
 					break;
 
 				last_err = cur_err;
@@ -352,7 +419,7 @@ static void pm8xxx_pwm_calc_period(unsigned int period_us,
 		}
 	}
 
-	
+	/* Use higher resolution */
 	if (best_m >= 3 && n == 6) {
 		n += 3;
 		best_m -= 3;
@@ -370,7 +437,7 @@ static void pm8xxx_pwm_calc_pwm_value(struct pwm_device *pwm,
 {
 	unsigned int max_pwm_value, tmp;
 
-	
+	/* Figure out pwm_value with overflow handling */
 	tmp = 1 << (sizeof(tmp) * 8 - pwm->period.pwm_size);
 	if (duty_us < tmp) {
 		tmp = duty_us << pwm->period.pwm_size;
@@ -489,7 +556,7 @@ static void pm8xxx_pwm_save_duty_time(struct pwm_device *pwm,
 	int	i;
 	u8	mask, val;
 
-	
+	/* Linear search for duty time */
 	for (i = 0; i < PM8XXX_PWM_1KHZ_COUNT_MAX; i++) {
 		if (duty_msec[i] >= lut->lut_duty_ms)
 			break;
@@ -511,7 +578,7 @@ static void pm8xxx_pwm_save_pause(struct pwm_device *pwm,
 	if (lut->flags & PM_PWM_LUT_PAUSE_HI_EN) {
 		pause_cnt = (lut->lut_pause_hi + duty_msec[time_cnt] / 2)
 				/ duty_msec[time_cnt];
-		
+		/* Linear search for pause time */
 		for (i = 0; i < PM8XXX_PWM_PAUSE_COUNT_MAX; i++) {
 			if (pause_count[i] >= pause_cnt)
 				break;
@@ -527,7 +594,7 @@ static void pm8xxx_pwm_save_pause(struct pwm_device *pwm,
 	pm8xxx_pwm_save(&pwm->pwm_lpg_ctl[5], mask, val);
 
 	if (lut->flags & PM_PWM_LUT_PAUSE_LO_EN) {
-		
+		/* Linear search for pause time */
 		pause_cnt = (lut->lut_pause_lo + duty_msec[time_cnt] / 2)
 				/ duty_msec[time_cnt];
 		for (i = 0; i < PM8XXX_PWM_PAUSE_COUNT_MAX; i++) {
@@ -574,7 +641,7 @@ static int pm8xxx_lpg_pwm_write(struct pwm_device *pwm, int start, int end)
 {
 	int	i, rc;
 
-	
+	/* Write in reverse way so 0 would be the last */
 	for (i = end - 1; i >= start; i--) {
 		rc = pm8xxx_writeb(pwm->chip->dev->parent,
 				   SSBI_REG_ADDR_LPG_CTL(i),
@@ -613,7 +680,7 @@ static int pm8xxx_pwm_set_dtest(struct pwm_device *pwm, int enable)
 	reg = pwm->pwm_id & PM8XXX_PWM_DTEST_BANK_MASK;
 
 	if (enable) {
-		
+		/* Observe LPG_OUT on DTEST1*/
 		reg |= (1 << PM8XXX_PWM_DTEST_SHIFT) &
 				PM8XXX_PWM_DTEST_MASK;
 	}
@@ -627,6 +694,12 @@ static int pm8xxx_pwm_set_dtest(struct pwm_device *pwm, int enable)
 	return rc;
 }
 
+/* APIs */
+/**
+ * pwm_request - request a PWM device
+ * @pwm_id: PWM id or channel
+ * @label: the label to identify the user
+ */
 struct pwm_device *pwm_request(int pwm_id, const char *label)
 {
 	struct pwm_device	*pwm;
@@ -656,6 +729,10 @@ struct pwm_device *pwm_request(int pwm_id, const char *label)
 }
 EXPORT_SYMBOL_GPL(pwm_request);
 
+/**
+ * pwm_free - free a PWM device
+ * @pwm: the PWM device
+ */
 void pwm_free(struct pwm_device *pwm)
 {
 	if (pwm == NULL || IS_ERR(pwm) || pwm->chip == NULL) {
@@ -680,7 +757,12 @@ void pwm_free(struct pwm_device *pwm)
 }
 EXPORT_SYMBOL_GPL(pwm_free);
 
-
+/**
+ * pwm_config - change a PWM device configuration
+ * @pwm: the PWM device
+ * @period_us: period in microseconds
+ * @duty_us: duty cycle in microseconds
+ */
 int pwm_config(struct pwm_device *pwm, int duty_us, int period_us)
 {
 	struct pm8xxx_pwm_period *period;
@@ -736,6 +818,10 @@ out_unlock:
 }
 EXPORT_SYMBOL_GPL(pwm_config);
 
+/**
+ * pwm_enable - start a PWM output toggling
+ * @pwm: the PWM device
+ */
 int pwm_enable(struct pwm_device *pwm)
 {
 	int	rc = 0;
@@ -757,14 +843,9 @@ int pwm_enable(struct pwm_device *pwm)
 		if (pwm_chip->is_lpg_supported) {
 			if (pwm->dtest_mode_supported)
 				pm8xxx_pwm_set_dtest(pwm, 1);
-
-			pm8xxx_pwm_bank_sel(pwm);
 			rc = pm8xxx_pwm_bank_enable(pwm, 1);
+			pm8xxx_pwm_bank_sel(pwm);
 			pm8xxx_pwm_start(pwm, 1, 0);
-			
-			rc = pm8xxx_writeb(pwm->chip->dev->parent,
-                                   SSBI_REG_ADDR_LPG_CTL(3),
-                                   pwm->pwm_lpg_ctl[3]);
 		} else {
 			pm8xxx_pwm_enable(pwm);
 		}
@@ -774,6 +855,10 @@ int pwm_enable(struct pwm_device *pwm)
 }
 EXPORT_SYMBOL_GPL(pwm_enable);
 
+/**
+ * pwm_disable - stop a PWM output toggling
+ * @pwm: the PWM device
+ */
 void pwm_disable(struct pwm_device *pwm)
 {
 	if (pwm == NULL || IS_ERR(pwm) || pwm->chip == NULL) {
@@ -797,6 +882,12 @@ void pwm_disable(struct pwm_device *pwm)
 }
 EXPORT_SYMBOL_GPL(pwm_disable);
 
+/**
+ * pm8xxx_pwm_config_period - change PWM period
+ *
+ * @pwm: the PWM device
+ * @pwm_p: period in struct pm8xxx_pwm_period
+ */
 int pm8xxx_pwm_config_period(struct pwm_device *pwm,
 			     struct pm8xxx_pwm_period *period)
 {
@@ -835,6 +926,11 @@ out_unlock:
 }
 EXPORT_SYMBOL(pm8xxx_pwm_config_period);
 
+/**
+ * pm8xxx_pwm_config_pwm_value - change a PWM device configuration
+ * @pwm: the PWM device
+ * @pwm_value: the duty cycle in raw PWM value (< 2^pwm_size)
+ */
 int pm8xxx_pwm_config_pwm_value(struct pwm_device *pwm, int pwm_value)
 {
 	int	rc = 0;
@@ -876,6 +972,18 @@ out_unlock:
 }
 EXPORT_SYMBOL_GPL(pm8xxx_pwm_config_pwm_value);
 
+/**
+ * pm8xxx_pwm_lut_config - change a PWM device configuration to use LUT
+ * @pwm: the PWM device
+ * @period_us: period in microseconds
+ * @duty_pct: arrary of duty cycles in percent, like 20, 50.
+ * @duty_time_ms: time for each duty cycle in milliseconds
+ * @start_idx: start index in lookup table from 0 to MAX-1
+ * @idx_len: number of index
+ * @pause_lo: pause time in milliseconds at low index
+ * @pause_hi: pause time in milliseconds at high index
+ * @flags: control flags
+ */
 int pm8xxx_pwm_lut_config(struct pwm_device *pwm, int period_us,
 			  int duty_pct[], int duty_time_ms, int start_idx,
 			  int idx_len, int pause_lo, int pause_hi, int flags)
@@ -920,6 +1028,16 @@ int pm8xxx_pwm_lut_config(struct pwm_device *pwm, int period_us,
 	period = &pwm->period;
 	mutex_lock(&pwm->chip->pwm_mutex);
 
+	if (flags & PM_PWM_BANK_HI)
+		pwm->banks = PM_PWM_BANK_HI;
+
+	if (flags & PM_PWM_BANK_LO)
+		pwm->banks |= PM_PWM_BANK_LO;
+
+	/*Enable both banks if banks information is not shared.*/
+	if (!pwm->banks)
+		pwm->banks |= (PM_PWM_BANK_LO | PM_PWM_BANK_HI);
+
 	if (!pwm->in_use) {
 		pr_err("pwm_id: %d: stale handle?\n", pwm->pwm_id);
 		rc = -EINVAL;
@@ -960,6 +1078,11 @@ out_unlock:
 }
 EXPORT_SYMBOL_GPL(pm8xxx_pwm_lut_config);
 
+/**
+ * pm8xxx_pwm_lut_enable - control a PWM device to start/stop LUT ramp
+ * @pwm: the PWM device
+ * @start: to start (1), or stop (0)
+ */
 int pm8xxx_pwm_lut_enable(struct pwm_device *pwm, int start)
 {
 	if (pwm == NULL || IS_ERR(pwm)) {

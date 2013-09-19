@@ -2617,9 +2617,9 @@ static void mmc_blk_remove_req(struct mmc_blk_data *md)
 					&md->power_ro_lock);
 
 			
-			if (mmc_card_sd(md->queue.card))
-				del_gendisk_async(md->disk);
-			else
+			//if (mmc_card_sd(md->queue.card))
+			//	del_gendisk_async(md->disk);
+			//else
 				del_gendisk(md->disk);
 		}
 

@@ -38,7 +38,7 @@
 #include <linux/usb/msm_hsusb_hw.h>
 #include <linux/usb/htc_info.h>
 #include <linux/regulator/consumer.h>
-#include <linux/mfd/pm8xxx/pm8921-charger.h>
+#include <linux/mfd/pm8xxx/pm8921-charger-htc.h>
 #include <linux/mfd/pm8xxx/misc.h>
 #include <linux/power_supply.h>
 

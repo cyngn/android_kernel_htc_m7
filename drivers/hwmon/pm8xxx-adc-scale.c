@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -17,6 +17,14 @@
 #include <linux/mfd/pm8xxx/pm8xxx-adc.h>
 #define KELVINMIL_DEGMIL	273160
 
+/* Units for temperature below (on x axis) is in 0.1DegC as
+   required by the battery driver. Note the resolution used
+   here to compute the table was done for DegC to milli-volts.
+   In consideration to limit the size of the table for the given
+   temperature range below, the result is linearly interpolated
+   and provided to the battery driver in the units desired for
+   their framework which is 0.1DegC. True resolution of 0.1DegC
+   will result in the below table size to increase by 10 times */
 static const struct pm8xxx_adc_map_pt adcmap_btm_threshold[] = {
 	{-300,	1642},
 	{-200,	1544},
@@ -87,151 +95,179 @@ static const struct pm8xxx_adc_map_pt adcmap_btm_threshold[] = {
 	{630,	496},
 	{640,	490},
 	{650,	485},
-	{660,	281},
-	{670,	274},
-	{680,	267},
-	{690,	260},
-	{700,	254},
-	{710,	247},
-	{720,	241},
-	{730,	235},
-	{740,	229},
-	{750,	224},
-	{760,	218},
-	{770,	213},
-	{780,	208},
-	{790,	203}
+	{660,	479},
+	{670,	474},
+	{680,	469},
+	{690,	464},
+	{700,	459},
+	{710,	454},
+	{720,	449},
+	{730,	445},
+	{740,	440},
+	{750,	437},
+	{760,	432},
+	{770,	428},
+	{780,	424},
+	{790,	420}
 };
-
-static struct pm8xxx_adc_map_table default_adcmap_btm = {
-	.table = adcmap_btm_threshold,
-	.size = ARRAY_SIZE(adcmap_btm_threshold),
-};
-
-static struct pm8xxx_adc_map_table *adcmap_btm_table = &default_adcmap_btm;
 
 static const struct pm8xxx_adc_map_pt adcmap_pa_therm[] = {
-	{1677,	-30},
-	{1671,	-29},
-	{1663,	-28},
-	{1656,	-27},
-	{1648,	-26},
-	{1640,	-25},
-	{1632,	-24},
-	{1623,	-23},
-	{1615,	-22},
-	{1605,	-21},
-	{1596,	-20},
-	{1586,	-19},
-	{1576,	-18},
-	{1565,	-17},
-	{1554,	-16},
-	{1543,	-15},
-	{1531,	-14},
-	{1519,	-13},
-	{1507,	-12},
-	{1494,	-11},
-	{1482,	-10},
-	{1468,	-9},
-	{1455,	-8},
-	{1441,	-7},
-	{1427,	-6},
-	{1412,	-5},
-	{1398,	-4},
-	{1383,	-3},
-	{1367,	-2},
-	{1352,	-1},
-	{1336,	0},
-	{1320,	1},
-	{1304,	2},
-	{1287,	3},
-	{1271,	4},
-	{1254,	5},
-	{1237,	6},
-	{1219,	7},
-	{1202,	8},
-	{1185,	9},
-	{1167,	10},
-	{1149,	11},
-	{1131,	12},
-	{1114,	13},
-	{1096,	14},
-	{1078,	15},
-	{1060,	16},
-	{1042,	17},
-	{1024,	18},
-	{1006,	19},
-	{988,	20},
-	{970,	21},
-	{952,	22},
-	{934,	23},
-	{917,	24},
+	{1731,	-30},
+	{1726,	-29},
+	{1721,	-28},
+	{1715,	-27},
+	{1710,	-26},
+	{1703,	-25},
+	{1697,	-24},
+	{1690,	-23},
+	{1683,	-22},
+	{1675,	-21},
+	{1667,	-20},
+	{1659,	-19},
+	{1650,	-18},
+	{1641,	-17},
+	{1632,	-16},
+	{1622,	-15},
+	{1611,	-14},
+	{1600,	-13},
+	{1589,	-12},
+	{1577,	-11},
+	{1565,	-10},
+	{1552,	-9},
+	{1539,	-8},
+	{1525,	-7},
+	{1511,	-6},
+	{1496,	-5},
+	{1481,	-4},
+	{1465,	-3},
+	{1449,	-2},
+	{1432,	-1},
+	{1415,	0},
+	{1398,	1},
+	{1380,	2},
+	{1362,	3},
+	{1343,	4},
+	{1324,	5},
+	{1305,	6},
+	{1285,	7},
+	{1265,	8},
+	{1245,	9},
+	{1224,	10},
+	{1203,	11},
+	{1182,	12},
+	{1161,	13},
+	{1139,	14},
+	{1118,	15},
+	{1096,	16},
+	{1074,	17},
+	{1052,	18},
+	{1030,	19},
+	{1008,	20},
+	{986,	21},
+	{964,	22},
+	{943,	23},
+	{921,	24},
 	{899,	25},
-	{882,	26},
-	{865,	27},
-	{848,	28},
-	{831,	29},
-	{814,	30},
-	{797,	31},
-	{781,	32},
-	{764,	33},
-	{748,	34},
-	{732,	35},
-	{717,	36},
-	{701,	37},
-	{686,	38},
-	{671,	39},
-	{656,	40},
-	{642,	41},
-	{627,	42},
-	{613,	43},
-	{599,	44},
-	{586,	45},
-	{572,	46},
-	{559,	47},
-	{546,	48},
-	{534,	49},
-	{522,	50},
-	{509,	51},
-	{498,	52},
-	{486,	53},
-	{475,	54},
-	{463,	55},
-	{452,	56},
-	{442,	57},
-	{431,	58},
-	{421,	59},
-	{411,	60},
-	{401,	61},
-	{392,	62},
-	{383,	63},
-	{374,	64},
-	{365,	65},
-	{356,	66},
-	{348,	67},
-	{339,	68},
-	{331,	69},
-	{323,	70},
-	{316,	71},
-	{308,	72},
-	{301,	73},
-	{294,	74},
-	{287,	75},
-	{280,	76},
-	{273,	77},
-	{267,	78},
-	{261,	79},
-	{255,	80},
-	{249,	81},
-	{243,	82},
-	{237,	83},
-	{232,	84},
-	{226,	85},
-	{221,	86},
-	{216,	87},
-	{211,	88},
-	{206,	89},
-	{201,	90}
+	{878,	26},
+	{857,	27},
+	{836,	28},
+	{815,	29},
+	{794,	30},
+	{774,	31},
+	{754,	32},
+	{734,	33},
+	{714,	34},
+	{695,	35},
+	{676,	36},
+	{657,	37},
+	{639,	38},
+	{621,	39},
+	{604,	40},
+	{586,	41},
+	{570,	42},
+	{553,	43},
+	{537,	44},
+	{521,	45},
+	{506,	46},
+	{491,	47},
+	{476,	48},
+	{462,	49},
+	{448,	50},
+	{435,	51},
+	{421,	52},
+	{409,	53},
+	{396,	54},
+	{384,	55},
+	{372,	56},
+	{361,	57},
+	{350,	58},
+	{339,	59},
+	{329,	60},
+	{318,	61},
+	{309,	62},
+	{299,	63},
+	{290,	64},
+	{281,	65},
+	{272,	66},
+	{264,	67},
+	{256,	68},
+	{248,	69},
+	{240,	70},
+	{233,	71},
+	{226,	72},
+	{219,	73},
+	{212,	74},
+	{206,	75},
+	{199,	76},
+	{193,	77},
+	{187,	78},
+	{182,	79},
+	{176,	80},
+	{171,	81},
+	{166,	82},
+	{161,	83},
+	{156,	84},
+	{151,	85},
+	{147,	86},
+	{142,	87},
+	{138,	88},
+	{134,	89},
+	{130,	90},
+	{126,	91},
+	{122,	92},
+	{119,	93},
+	{115,	94},
+	{112,	95},
+	{109,	96},
+	{106,	97},
+	{103,	98},
+	{100,	99},
+	{97,	100},
+	{94,	101},
+	{91,	102},
+	{89,	103},
+	{86,	104},
+	{84,	105},
+	{82,	106},
+	{79,	107},
+	{77,	108},
+	{75,	109},
+	{73,	110},
+	{71,	111},
+	{69,	112},
+	{67,	113},
+	{65,	114},
+	{64,	115},
+	{62,	116},
+	{60,	117},
+	{59,	118},
+	{57,	119},
+	{56,	120},
+	{54,	121},
+	{53,	122},
+	{51,	123},
+	{50,	124},
+	{49,	125}
 };
 
 static const struct pm8xxx_adc_map_pt adcmap_ntcg_104ef_104fb[] = {
@@ -412,7 +448,7 @@ static int32_t pm8xxx_adc_map_linear(const struct pm8xxx_adc_map_pt *pts,
 	if ((pts == NULL) || (output == NULL))
 		return -EINVAL;
 
-	
+	/* Check if table is descending or ascending */
 	if (tablesize > 1) {
 		if (pts[0].x < pts[1].x)
 			descending = 0;
@@ -420,9 +456,13 @@ static int32_t pm8xxx_adc_map_linear(const struct pm8xxx_adc_map_pt *pts,
 
 	while (i < tablesize) {
 		if ((descending == 1) && (pts[i].x < input)) {
+			/* table entry is less than measured
+				value and table is descending, stop */
 			break;
 		} else if ((descending == 0) &&
 				(pts[i].x > input)) {
+			/* table entry is greater than measured
+				value and table is ascending, stop */
 			break;
 		} else {
 			i++;
@@ -434,8 +474,8 @@ static int32_t pm8xxx_adc_map_linear(const struct pm8xxx_adc_map_pt *pts,
 	else if (i == tablesize)
 		*output = pts[tablesize-1].y;
 	else {
-		
-		
+		/* result is between search_index and search_index-1 */
+		/* interpolate linearly */
 		*output = (((int32_t) ((pts[i].y - pts[i-1].y)*
 			(input - pts[i-1].x))/
 			(pts[i].x - pts[i-1].x))+
@@ -454,7 +494,7 @@ static int32_t pm8xxx_adc_map_batt_therm(const struct pm8xxx_adc_map_pt *pts,
 	if ((pts == NULL) || (output == NULL))
 		return -EINVAL;
 
-	
+	/* Check if table is descending or ascending */
 	if (tablesize > 1) {
 		if (pts[0].y < pts[1].y)
 			descending = 0;
@@ -462,8 +502,12 @@ static int32_t pm8xxx_adc_map_batt_therm(const struct pm8xxx_adc_map_pt *pts,
 
 	while (i < tablesize) {
 		if ((descending == 1) && (pts[i].y < input)) {
+			/* table entry is less than measured
+				value and table is descending, stop */
 			break;
 		} else if ((descending == 0) && (pts[i].y > input)) {
+			/* table entry is greater than measured
+				value and table is ascending, stop */
 			break;
 		} else {
 			i++;
@@ -475,8 +519,8 @@ static int32_t pm8xxx_adc_map_batt_therm(const struct pm8xxx_adc_map_pt *pts,
 	} else if (i == tablesize) {
 		*output = pts[tablesize-1].x;
 	} else {
-		
-		
+		/* result is between search_index and search_index-1 */
+		/* interpolate linearly */
 		*output = (((int32_t) ((pts[i].x - pts[i-1].x)*
 			(input - pts[i-1].y))/
 			(pts[i].y - pts[i-1].y))+
@@ -485,12 +529,6 @@ static int32_t pm8xxx_adc_map_batt_therm(const struct pm8xxx_adc_map_pt *pts,
 
 	return 0;
 }
-
-void pm8xxx_adc_set_adcmap_btm_table(struct pm8xxx_adc_map_table *adcmap_table)
-{
-	adcmap_btm_table = adcmap_table;
-}
-EXPORT_SYMBOL_GPL(pm8xxx_adc_set_adcmap_btm_table);
 
 int32_t pm8xxx_adc_scale_default(int32_t adc_code,
 		const struct pm8xxx_adc_properties *adc_properties,
@@ -530,13 +568,17 @@ int32_t pm8xxx_adc_scale_default(int32_t adc_code,
 	adc_chan_result->measurement = scale_voltage *
 				chan_properties->offset_gain_denominator;
 
-	
+	/* do_div only perform positive integer division! */
 	do_div(adc_chan_result->measurement,
 				chan_properties->offset_gain_numerator);
 
 	if (negative_rawfromoffset)
 		adc_chan_result->measurement = -adc_chan_result->measurement;
 
+	/* Note: adc_chan_result->measurement is in the unit of
+	 * adc_properties.adc_reference. For generic channel processing,
+	 * channel measurement is a scale/ratio relative to the adc
+	 * reference input */
 	adc_chan_result->physical = adc_chan_result->measurement;
 
 	return 0;
@@ -580,45 +622,12 @@ int32_t pm8xxx_adc_scale_batt_therm(int32_t adc_code,
 			adc_properties, chan_properties);
 
 	return pm8xxx_adc_map_batt_therm(
-			adcmap_btm_table->table,
-			adcmap_btm_table->size,
+			adcmap_btm_threshold,
+			ARRAY_SIZE(adcmap_btm_threshold),
 			bat_voltage,
 			&adc_chan_result->physical);
 }
 EXPORT_SYMBOL_GPL(pm8xxx_adc_scale_batt_therm);
-#if 0
-int32_t pm8xxx_adc_scale_batt_therm(int32_t adc_code,
-		const struct pm8xxx_adc_properties *adc_properties,
-		const struct pm8xxx_adc_chan_properties *chan_properties,
-		struct pm8xxx_adc_chan_result *adc_chan_result)
-{
-	pm8xxx_adc_scale_default(adc_code, adc_properties, chan_properties,
-								adc_chan_result);
-	
-	return pm8xxx_adc_map_linear(
-			adcmap_batttherm,
-			ARRAY_SIZE(adcmap_batttherm),
-			adc_chan_result->physical,
-			&adc_chan_result->physical);
-}
-EXPORT_SYMBOL_GPL(pm8xxx_adc_scale_batt_therm);
-#endif
-#if 0
-int32_t pm8xxx_adc_scale_batt_therm(int32_t adc_code,
-		const struct pm8xxx_adc_properties *adc_properties,
-		const struct pm8xxx_adc_chan_properties *chan_properties,
-		struct pm8xxx_adc_chan_result *adc_chan_result)
-{
-	adc_chan_result->measurement = adc_code;
-	
-	return pm8xxx_adc_map_linear(
-			adcmap_batttherm,
-			ARRAY_SIZE(adcmap_batttherm),
-			adc_code,
-			&adc_chan_result->physical);
-}
-EXPORT_SYMBOL_GPL(pm8xxx_adc_scale_batt_therm);
-#endif
 
 int32_t pm8xxx_adc_scale_pa_therm(int32_t adc_code,
 		const struct pm8xxx_adc_properties *adc_properties,
@@ -681,7 +690,7 @@ int32_t pm8xxx_adc_scale_pmic_therm(int32_t adc_code,
 	pmic_voltage += chan_properties->adc_graph[ADC_CALIB_ABSOLUTE].dx;
 
 	if (pmic_voltage > 0) {
-		
+		/* 2mV/K */
 		adc_chan_result->measurement = pmic_voltage*
 			chan_properties->offset_gain_denominator;
 
@@ -690,7 +699,7 @@ int32_t pm8xxx_adc_scale_pmic_therm(int32_t adc_code,
 	} else {
 		adc_chan_result->measurement = 0;
 	}
-	
+	/* Change to .001 deg C */
 	adc_chan_result->measurement -= KELVINMIL_DEGMIL;
 	adc_chan_result->physical = (int32_t)adc_chan_result->measurement;
 
@@ -698,6 +707,9 @@ int32_t pm8xxx_adc_scale_pmic_therm(int32_t adc_code,
 }
 EXPORT_SYMBOL_GPL(pm8xxx_adc_scale_pmic_therm);
 
+/* Scales the ADC code to 0.001 degrees C using the map
+ * table for the XO thermistor.
+ */
 int32_t pm8xxx_adc_tdkntcg_therm(int32_t adc_code,
 		const struct pm8xxx_adc_properties *adc_properties,
 		const struct pm8xxx_adc_chan_properties *chan_properties,
@@ -728,8 +740,8 @@ int32_t pm8xxx_adc_batt_scaler(struct pm8xxx_adc_arb_btm_param *btm_param,
 	int rc;
 
 	rc = pm8xxx_adc_map_linear(
-		adcmap_btm_table->table,
-		adcmap_btm_table->size,
+		adcmap_btm_threshold,
+		ARRAY_SIZE(adcmap_btm_threshold),
 		(btm_param->low_thr_temp),
 		&btm_param->low_thr_voltage);
 	if (rc)
@@ -742,8 +754,8 @@ int32_t pm8xxx_adc_batt_scaler(struct pm8xxx_adc_arb_btm_param *btm_param,
 		chan_properties->adc_graph[ADC_CALIB_RATIOMETRIC].adc_gnd;
 
 	rc = pm8xxx_adc_map_linear(
-		adcmap_btm_table->table,
-		adcmap_btm_table->size,
+		adcmap_btm_threshold,
+		ARRAY_SIZE(adcmap_btm_threshold),
 		(btm_param->high_thr_temp),
 		&btm_param->high_thr_voltage);
 	if (rc)

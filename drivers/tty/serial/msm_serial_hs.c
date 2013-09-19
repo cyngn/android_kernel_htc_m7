@@ -186,6 +186,7 @@ struct msm_hs_port {
 	enum uart_func_mode func_mode;
 	bool is_shutdown;
 	bool termios_in_progress;
+	int rx_buf_size;
 };
 
 #define MSM_UARTDM_BURST_SIZE 16   /* DM burst size (in bytes) */
@@ -1004,7 +1005,7 @@ static void msm_hs_set_termios(struct uart_port *uport,
 		spin_unlock_irqrestore(&uport->lock, flags);
 		ret = wait_event_timeout(msm_uport->rx.wait,
 			msm_uport->rx_discard_flush_issued == false,
-			msecs_to_jiffies(50));
+			msecs_to_jiffies(300));
 			if (!ret) {
 				pr_err("%s(): timeout for rx discard flush\n",
 								__func__);
@@ -1190,9 +1191,9 @@ static void msm_hs_start_rx_locked(struct uart_port *uport)
 	 * Zeroed out UART RX software buffer which would help to
 	 * check how much data is copied if there is any RX stall.
 	 */
-	memset(msm_uport->rx.buffer, 0x00, UARTDM_RX_BUF_SIZE);
+	memset(msm_uport->rx.buffer, 0x00, msm_uport->rx_buf_size);
 	msm_hs_write(uport, UARTDM_CR_ADDR, RESET_STALE_INT);
-	msm_hs_write(uport, UARTDM_DMRX_ADDR, UARTDM_RX_BUF_SIZE);
+	msm_hs_write(uport, UARTDM_DMRX_ADDR, msm_uport->rx_buf_size);
 	msm_hs_write(uport, UARTDM_CR_ADDR, STALE_EVENT_ENABLE);
 	msm_uport->imr_reg |= UARTDM_ISR_RXLEV_BMSK;
 
@@ -2246,7 +2247,7 @@ static int uartdm_init_port(struct uart_port *uport)
 			(unsigned long) &tx->tlet);
 
 	rx->pool = dma_pool_create("rx_buffer_pool", uport->dev,
-				   UARTDM_RX_BUF_SIZE, 16, 0);
+				   msm_uport->rx_buf_size, 16, 0);
 	if (!rx->pool) {
 		pr_err("%s(): cannot allocate rx_buffer_pool", __func__);
 		ret = -ENOMEM;
@@ -2275,8 +2276,8 @@ static int uartdm_init_port(struct uart_port *uport)
 		goto free_rx_command_ptr;
 	}
 
-	rx->command_ptr->num_rows = ((UARTDM_RX_BUF_SIZE >> 4) << 16) |
-					 (UARTDM_RX_BUF_SIZE >> 4);
+	rx->command_ptr->num_rows = ((msm_uport->rx_buf_size >> 4) << 16) |
+					 (msm_uport->rx_buf_size >> 4);
 
 	rx->command_ptr->dst_row_addr = rx->rbuffer;
 
@@ -2350,7 +2351,6 @@ static int __devinit msm_hs_probe(struct platform_device *pdev)
 	uport = &msm_uport->uport;
 
 	uport->dev = &pdev->dev;
-	platform_set_drvdata(pdev, uport);
 
 	resource = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (unlikely(!resource))
@@ -2409,6 +2409,11 @@ static int __devinit msm_hs_probe(struct platform_device *pdev)
 			return -EINVAL;
 		}
 	}
+
+	if (pdata && pdata->uartdm_rx_buf_size)
+		msm_uport->rx_buf_size = pdata->uartdm_rx_buf_size;
+	else
+		msm_uport->rx_buf_size = UARTDM_RX_BUF_SIZE;
 
 	resource = platform_get_resource_byname(pdev, IORESOURCE_DMA,
 						"uartdm_channels");
@@ -2660,8 +2665,6 @@ static void __exit msm_serial_hs_exit(void)
 	uart_unregister_driver(&msm_hs_driver);
 }
 
-#ifndef CONFIG_BT_MSM_SLEEP
-/* Bluesleep manages uart clk control */
 static int msm_hs_runtime_idle(struct device *dev)
 {
 	/*
@@ -2694,17 +2697,13 @@ static const struct dev_pm_ops msm_hs_dev_pm_ops = {
 	.runtime_resume  = msm_hs_runtime_resume,
 	.runtime_idle    = msm_hs_runtime_idle,
 };
-#endif /* CONFIG_BT_MSM_SLEEP */
 
 static struct platform_driver msm_serial_hs_platform_driver = {
 	.probe	= msm_hs_probe,
 	.remove = __devexit_p(msm_hs_remove),
 	.driver = {
 		.name = "msm_serial_hs",
-#ifndef CONFIG_BT_MSM_SLEEP
-		/* Bluesleep manages uart clk control */
 		.pm   = &msm_hs_dev_pm_ops,
-#endif
 	},
 };
 

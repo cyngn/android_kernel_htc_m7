@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
+ * Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -26,31 +26,29 @@
 #include <linux/mfd/pm8xxx/core.h>
 #include <linux/mfd/pm8xxx/regulator.h>
 
-#define REG_HWREV		0x002  
-#define REG_HWREV_2		0x0E8  
+#define REG_HWREV		0x002  /* PMIC4 revision */
+#define REG_HWREV_2		0x0E8  /* PMIC4 revision 2 */
 
 #define REG_MPP_BASE		0x050
 #define REG_RTC_BASE		0x11D
 #define REG_IRQ_BASE            0x1BB
-
-#define REG_SPK_BASE		0x253
-#define REG_SPK_REGISTERS	3
-
-#define REG_TEMP_ALARM_CTRL	0x01B
-#define REG_TEMP_ALARM_PWM	0x09B
 
 #define REG_BATT_ALARM_THRESH	0x023
 #define REG_BATT_ALARM_CTRL1	0x024
 #define REG_BATT_ALARM_CTRL2	0x021
 #define REG_BATT_ALARM_PWM_CTRL	0x020
 
+#define REG_SPK_BASE		0x253
+#define REG_SPK_REGISTERS	6
+
+#define REG_TEMP_ALARM_CTRL	0x01B
+#define REG_TEMP_ALARM_PWM	0x09B
 
 #define PM8038_VERSION_MASK	0xFFF0
 #define PM8038_VERSION_VALUE	0x09F0
 #define PM8038_REVISION_MASK	0x000F
 
 #define REG_PM8038_PON_CNTRL_3	0x01D
-#define PM8038_RESTART_REASON_MASK	0x07
 
 #define SINGLE_IRQ_RESOURCE(_name, _irq) \
 { \
@@ -66,6 +64,7 @@ struct pm8038 {
 	struct mfd_cell					*mfd_regulators;
 	struct pm8xxx_regulator_core_platform_data	*regulator_cdata;
 	u32						rev_registers;
+	u8						restart_reason;
 };
 
 static int pm8038_readb(const struct device *dev, u16 addr, u8 *val)
@@ -130,6 +129,14 @@ static int pm8038_get_revision(const struct device *dev)
 	return pmic->rev_registers & PM8038_REVISION_MASK;
 }
 
+static u8 pm8038_restart_reason(const struct device *dev)
+{
+	const struct pm8xxx_drvdata *pm8038_drvdata = dev_get_drvdata(dev);
+	const struct pm8038 *pmic = pm8038_drvdata->pm_chip_data;
+
+	return pmic->restart_reason;
+}
+
 static struct pm8xxx_drvdata pm8038_drvdata = {
 	.pmic_readb		= pm8038_readb,
 	.pmic_writeb		= pm8038_writeb,
@@ -138,6 +145,7 @@ static struct pm8xxx_drvdata pm8038_drvdata = {
 	.pmic_read_irq_stat	= pm8038_read_irq_stat,
 	.pmic_get_version	= pm8038_get_version,
 	.pmic_get_revision	= pm8038_get_revision,
+	.pmic_restart_reason	= pm8038_restart_reason,
 };
 
 static const struct resource gpio_cell_resources[] __devinitconst = {
@@ -226,26 +234,6 @@ static struct mfd_cell bms_cell __devinitdata = {
 	.resources	= bms_cell_resources,
 	.num_resources	= ARRAY_SIZE(bms_cell_resources),
 };
-static const struct resource batt_alarm_cell_resources[] __devinitconst = {
-	SINGLE_IRQ_RESOURCE("pm8921_batt_alarm_irq", PM8921_BATT_ALARM_IRQ),
-};
-
-static struct pm8xxx_batt_alarm_core_data batt_alarm_cdata = {
-	.irq_name		= "pm8921_batt_alarm_irq",
-	.reg_addr_threshold	= REG_BATT_ALARM_THRESH,
-	.reg_addr_ctrl1		= REG_BATT_ALARM_CTRL1,
-	.reg_addr_ctrl2		= REG_BATT_ALARM_CTRL2,
-	.reg_addr_pwm_ctrl	= REG_BATT_ALARM_PWM_CTRL,
-};
-
-static struct mfd_cell batt_alarm_cell __devinitdata = {
-	.name		= PM8XXX_BATT_ALARM_DEV_NAME,
-	.id		= -1,
-	.resources	= batt_alarm_cell_resources,
-	.num_resources	= ARRAY_SIZE(batt_alarm_cell_resources),
-	.platform_data	= &batt_alarm_cdata,
-	.pdata_size	= sizeof(struct pm8xxx_batt_alarm_core_data),
-};
 static const struct resource mpp_cell_resources[] __devinitconst = {
 	{
 		.start	= PM8038_IRQ_BLOCK_BIT(PM8038_MPP_BLOCK_START, 0),
@@ -310,7 +298,7 @@ static const struct resource resources_spk[] __devinitconst = {
 	[0] = {
 		.name   = PM8XXX_SPK_DEV_NAME,
 		.start  = REG_SPK_BASE,
-		.end    = REG_SPK_BASE + REG_SPK_REGISTERS,
+		.end    = REG_SPK_BASE + REG_SPK_REGISTERS - 1,
 		.flags  = IORESOURCE_IO,
 	},
 };
@@ -353,6 +341,27 @@ static struct mfd_cell thermal_alarm_cell __devinitdata = {
 	.pdata_size	= sizeof(struct pm8xxx_tm_core_data),
 };
 
+static const struct resource batt_alarm_cell_resources[] __devinitconst = {
+	SINGLE_IRQ_RESOURCE("pm8921_batt_alarm_irq", PM8038_BATT_ALARM_IRQ),
+};
+
+static struct pm8xxx_batt_alarm_core_data batt_alarm_cdata = {
+	.irq_name		= "pm8921_batt_alarm_irq",
+	.reg_addr_threshold	= REG_BATT_ALARM_THRESH,
+	.reg_addr_ctrl1		= REG_BATT_ALARM_CTRL1,
+	.reg_addr_ctrl2		= REG_BATT_ALARM_CTRL2,
+	.reg_addr_pwm_ctrl	= REG_BATT_ALARM_PWM_CTRL,
+};
+
+static struct mfd_cell batt_alarm_cell __devinitdata = {
+	.name		= PM8XXX_BATT_ALARM_DEV_NAME,
+	.id		= -1,
+	.resources	= batt_alarm_cell_resources,
+	.num_resources	= ARRAY_SIZE(batt_alarm_cell_resources),
+	.platform_data	= &batt_alarm_cdata,
+	.pdata_size	= sizeof(struct pm8xxx_batt_alarm_core_data),
+};
+
 static const struct resource ccadc_cell_resources[] __devinitconst = {
 	SINGLE_IRQ_RESOURCE("PM8921_BMS_CCADC_EOC", PM8921_BMS_CCADC_EOC),
 };
@@ -365,12 +374,12 @@ static struct mfd_cell ccadc_cell __devinitdata = {
 };
 
 static struct mfd_cell vibrator_cell __devinitdata = {
-        .name           = PM8XXX_VIBRATOR_DEV_NAME,
-        .id             = -1,
+	.name           = PM8XXX_VIBRATOR_DEV_NAME,
+	.id             = -1,
 };
 
 static struct pm8xxx_vreg regulator_data[] = {
-	
+	/*   name	     pc_name	    ctrl   test   hpm_min */
 	NLDO1200("8038_l1",		    0x0AE, 0x0AF, LDO_1200),
 	NLDO("8038_l2",      "8038_l2_pc",  0x0B0, 0x0B1, LDO_150),
 	PLDO("8038_l3",      "8038_l3_pc",  0x0B2, 0x0B3, LDO_50),
@@ -397,17 +406,17 @@ static struct pm8xxx_vreg regulator_data[] = {
 	NLDO("8038_l26",     "8038_l26_pc", 0x0E0, 0x0E1, LDO_150),
 	NLDO1200("8038_l27",		    0x0E2, 0x0E3, LDO_1200),
 
-	
+	/*   name	pc_name       ctrl   test2  clk    sleep  hpm_min */
 	SMPS("8038_s1", "8038_s1_pc", 0x1E0, 0x1E5, 0x009, 0x1E2, SMPS_1500),
 	SMPS("8038_s2", "8038_s2_pc", 0x1D8, 0x1DD, 0x00A, 0x1DA, SMPS_1500),
 	SMPS("8038_s3", "8038_s3_pc", 0x1D0, 0x1D5, 0x00B, 0x1D2, SMPS_1500),
 	SMPS("8038_s4", "8038_s4_pc", 0x1E8, 0x1ED, 0x00C, 0x1EA, SMPS_1500),
 
-	
+	/*     name	  ctrl fts_cnfg1 pfm  pwr_cnfg  hpm_min */
 	FTSMPS("8038_s5", 0x025, 0x02E, 0x026, 0x032, SMPS_2000),
 	FTSMPS("8038_s6", 0x036, 0x03F, 0x037, 0x043, SMPS_2000),
 
-	
+	/* name		       pc_name	       ctrl   test */
 	VS("8038_lvs1",        "8038_lvs1_pc", 0x060, 0x061),
 	VS("8038_lvs2",        "8038_lvs2_pc", 0x062, 0x063),
 };
@@ -453,7 +462,7 @@ pm8038_add_regulators(const struct pm8038_platform_data *pdata,
 	struct pm8xxx_regulator_core_platform_data *cdata;
 	int i;
 
-	
+	/* Add one device for each regulator used by the board. */
 	mfd_regulators = kzalloc(sizeof(struct mfd_cell)
 				 * (pdata->num_regulators), GFP_KERNEL);
 	if (!mfd_regulators) {
@@ -605,6 +614,17 @@ pm8038_add_subdevices(const struct pm8038_platform_data *pdata,
 		}
 	}
 
+	if (pdata->vibrator_pdata) {
+		vibrator_cell.platform_data = pdata->vibrator_pdata;
+		vibrator_cell.pdata_size =
+			sizeof(struct pm8xxx_vibrator_platform_data);
+		ret = mfd_add_devices(pmic->dev, 0, &vibrator_cell, 1, NULL, 0);
+		if (ret) {
+			pr_err("Failed to add vibrator ret=%d\n", ret);
+			goto bail;
+		}
+	}
+
 	if (pdata->spk_pdata) {
 		spk_cell.platform_data = pdata->spk_pdata;
 		spk_cell.pdata_size = sizeof(struct pm8xxx_spk_platform_data);
@@ -614,18 +634,6 @@ pm8038_add_subdevices(const struct pm8038_platform_data *pdata,
 			goto bail;
 		}
 	}
-
-        if (pdata->vibrator_pdata) {
-                vibrator_cell.platform_data = pdata->vibrator_pdata;
-                vibrator_cell.pdata_size =
-                                sizeof(struct pm8xxx_vibrator_platform_data);
-                ret = mfd_add_devices(pmic->dev, 0, &vibrator_cell, 1, NULL, 0);
-                if (ret) {
-                        pr_err("Failed to add vibrator subdevice ret=%d\n",
-                                                                        ret);
-                        goto bail;
-                }
-        }
 
 	if (pdata->num_regulators > 0 && pdata->regulator_pdatas) {
 		ret = pm8038_add_regulators(pdata, pmic, irq_base);
@@ -694,14 +702,17 @@ pm8038_add_subdevices(const struct pm8038_platform_data *pdata,
 		pr_err("Failed to add thermal alarm subdevice ret=%d\n", ret);
 		goto bail;
 	}
+
 	ret = mfd_add_devices(pmic->dev, 0, &batt_alarm_cell, 1, NULL,
 				irq_base);
 	if (ret) {
-		pr_err("Failed to add battery alarm subdevice ret=%d\n",
-			ret);
+		pr_err("Failed to add battery alarm subdevice ret=%d\n", ret);
 		goto bail;
 	}
+
 	if (pdata->ccadc_pdata) {
+		pdata->ccadc_pdata->ccadc_cdata.batt_temp_channel
+						= CHANNEL_BATT_THERM;
 		ccadc_cell.platform_data = pdata->ccadc_pdata;
 		ccadc_cell.pdata_size =
 				sizeof(struct pm8xxx_ccadc_platform_data);
@@ -722,17 +733,6 @@ bail:
 	}
 	return ret;
 }
-
-static const char * const pm8038_restart_reason[] = {
-	[0] = "Unknown",
-	[1] = "Triggered from CBL (external charger)",
-	[2] = "Triggered from KPD (power key press)",
-	[3] = "Triggered from CHG (usb charger insertion)",
-	[4] = "Triggered from SMPL (sudden momentary power loss)",
-	[5] = "Triggered from RTC (real time clock)",
-	[6] = "Triggered by Hard Reset",
-	[7] = "Triggered by General Purpose Trigger",
-};
 
 static const char * const pm8038_rev_names[] = {
 	[PM8XXX_REVISION_8038_TEST]	= "test",
@@ -762,7 +762,7 @@ static int __devinit pm8038_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-	
+	/* Read PMIC chip revision */
 	rc = msm_ssbi_read(pdev->dev.parent, REG_HWREV, &val, sizeof(val));
 	if (rc) {
 		pr_err("Failed to read hw rev reg %d:rc=%d\n", REG_HWREV, rc);
@@ -771,7 +771,7 @@ static int __devinit pm8038_probe(struct platform_device *pdev)
 	pr_info("PMIC revision 1: PM8038 rev %02X\n", val);
 	pmic->rev_registers = val;
 
-	
+	/* Read PMIC chip revision 2 */
 	rc = msm_ssbi_read(pdev->dev.parent, REG_HWREV_2, &val, sizeof(val));
 	if (rc) {
 		pr_err("Failed to read hw rev 2 reg %d:rc=%d\n",
@@ -785,7 +785,7 @@ static int __devinit pm8038_probe(struct platform_device *pdev)
 	pm8038_drvdata.pm_chip_data = pmic;
 	platform_set_drvdata(pdev, &pm8038_drvdata);
 
-	
+	/* Print out human readable version and revision names. */
 	version = pm8xxx_get_version(pmic->dev);
 	if (version == PM8XXX_VERSION_8038) {
 		revision = pm8xxx_get_revision(pmic->dev);
@@ -796,21 +796,21 @@ static int __devinit pm8038_probe(struct platform_device *pdev)
 		WARN_ON(version != PM8XXX_VERSION_8038);
 	}
 
-	
+	/* Log human readable restart reason */
 	rc = msm_ssbi_read(pdev->dev.parent, REG_PM8038_PON_CNTRL_3, &val, 1);
 	if (rc) {
 		pr_err("Cannot read restart reason rc=%d\n", rc);
 		goto err_read_rev;
 	}
-	val &= PM8038_RESTART_REASON_MASK;
-	pr_info("PMIC Restart Reason: %s\n", pm8038_restart_reason[val]);
+	val &= PM8XXX_RESTART_REASON_MASK;
+	pr_info("PMIC Restart Reason: %s\n", pm8xxx_restart_reason_str[val]);
+	pmic->restart_reason = val;
 
 	rc = pm8038_add_subdevices(pdata, pmic);
 	if (rc) {
 		pr_err("Cannot add subdevices rc=%d\n", rc);
 		goto err;
 	}
-
 
 	return 0;
 
