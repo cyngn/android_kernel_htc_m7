@@ -162,5 +162,11 @@ obj-$(CONFIG_MFD_PM8XXX_DEBUG) 	+= pm8xxx-debug.o
 obj-$(CONFIG_MFD_PM8XXX_PWM) 	+= pm8xxx-pwm.o
 obj-$(CONFIG_MFD_PM8XXX_MISC) 	+= pm8xxx-misc.o
 obj-$(CONFIG_MFD_PM8XXX_SPK) 	+= pm8xxx-spk.o
-obj-$(CONFIG_MFD_PM8XXX_BATT_ALARM) 	+= pm8xxx-batt-alarm.o
+ifdef CONFIG_MFD_PM8XXX_BATT_ALARM
+ifndef CONFIG_HTC_BATT_8960
+	obj-y += pm8xxx-batt-alarm.o
+else
+	obj-y += pm8xxx-batt-alarm-htc.o
+endif
+endif
 obj-$(CONFIG_MFD_ANATOP)	+= anatop-mfd.o
