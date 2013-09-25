@@ -15,6 +15,10 @@
  *
  */
 
+#ifdef CONFIG_HTC_BATT_8960
+#include "pm8xxx-adc-htc.h"
+#else
+
 #ifndef __PM8XXX_ADC_H
 #define __PM8XXX_ADC_H
 
@@ -603,4 +607,5 @@ static inline uint32_t pm8xxx_adc_btm_configure(
 { return -ENXIO; }
 #endif
 
+#endif
 #endif /* PM8XXX_ADC_H */

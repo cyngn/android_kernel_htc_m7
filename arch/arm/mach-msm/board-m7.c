@@ -23,7 +23,6 @@
 #include <linux/mfd/wcd9xxx/core.h>
 #include <linux/mfd/wcd9xxx/pdata.h>
 #include <linux/mfd/pm8xxx/misc.h>
-#include <linux/mfd/pm8xxx/batterydata-lib.h>
 #include <linux/msm_ssbi.h>
 #include <linux/spi/spi.h>
 #include <linux/dma-contiguous.h>
@@ -1020,18 +1019,18 @@ static struct pc_temp_ocv_lut  pc_temp_ocv_id_1 = {
 	}
 };
 
-struct bms_battery_data  bms_battery_data_id_1 = {
+struct pm8921_bms_battery_data  bms_battery_data_id_1 = {
 	.fcc			= 2300,
 	.fcc_temp_lut		= &fcc_temp_id_1,
 	.fcc_sf_lut		= &fcc_sf_id_1,
 	.pc_temp_ocv_lut	= &pc_temp_ocv_id_1,
 	.pc_sf_lut		= &pc_sf_id_1,
 	.rbatt_sf_lut		= &rbatt_sf_id_1,
-	//.rbatt_est_ocv_lut	= &rbatt_est_ocv_id_1,
+	.rbatt_est_ocv_lut	= &rbatt_est_ocv_id_1,
 	.default_rbatt_mohm	= 250,
 	.delta_rbatt_mohm	= 0,
-	//.level_ocv_update_stop_begin	= 10,
-	//.level_ocv_update_stop_end	= 20,
+	.level_ocv_update_stop_begin	= 10,
+	.level_ocv_update_stop_end	= 20,
 };
 
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -10,14 +10,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-/*
- * Qualcomm PMIC irq 8xxx driver header file
- *
- */
-
-#ifdef CONFIG_HTC_BATT_8960
-#include "irq-htc.h"
-#else
 
 #ifndef __MFD_PM8XXX_IRQ_H
 #define __MFD_PM8XXX_IRQ_H
@@ -46,6 +38,9 @@ int pm8xxx_get_irq_stat(struct pm_irq_chip *chip, int irq);
 struct pm_irq_chip *pm8xxx_irq_init(struct device *dev,
 				const struct pm8xxx_irq_platform_data *pdata);
 int pm8xxx_irq_exit(struct pm_irq_chip *chip);
+int pm8xxx_get_irq_wake_stat(struct pm_irq_chip *chip, int irq);
+int pm8xxx_get_irq_base(struct pm_irq_chip *chip);
+int pm8xxx_get_irq_it_stat(struct pm_irq_chip *chip, int irq);
 #else
 static inline int pm8xxx_get_irq_stat(struct pm_irq_chip *chip, int irq)
 {
@@ -60,6 +55,25 @@ static inline int pm8xxx_irq_exit(struct pm_irq_chip *chip)
 {
 	return -ENXIO;
 }
-#endif /* CONFIG_MFD_PM8XXX_IRQ */
-#endif /* __MFD_PM8XXX_IRQ_H */
-#endif
+static inline int __devexit pm8xxx_irq_exit(struct pm_irq_chip *chip)
+{
+	return -ENXIO;
+}
+static inline int pm8xxx_get_wake_stat(struct pm_irq_chip *chip, int irq)
+{
+	return -ENXIO;
+}
+static inline int pm8xxx_get_irq_wake_stat(struct pm_irq_chip *chip, int irq)
+{
+	return -ENXIO;
+}
+static inline int pm8xxx_get_irq_base(struct pm_irq_chip *chip)
+{
+	return -ENXIO;
+}
+static inline int pm8xxx_get_irq_it_stat(struct pm_irq_chip *chip, int irq)
+{
+	return -ENXIO;
+}
+#endif 
+#endif 

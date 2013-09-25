@@ -10,6 +10,10 @@
  * GNU General Public License for more details.
  */
 
+#ifdef CONFIG_HTC_BATT_8960
+#include "ccadc-htc.h"
+#else
+
 #ifndef __PMIC8XXX_CCADC_H__
 #define __PMIC8XXX_CCADC_H__
 
@@ -90,4 +94,5 @@ static inline int pm8xxx_ccadc_get_battery_current(int *bat_current)
 }
 #endif
 
+#endif
 #endif /* __PMIC8XXX_CCADC_H__ */

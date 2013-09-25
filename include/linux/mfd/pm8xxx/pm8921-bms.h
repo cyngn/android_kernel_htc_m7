@@ -10,6 +10,10 @@
  * GNU General Public License for more details.
  */
 
+#ifdef CONFIG_HTC_BATT_8960
+#include "pm8921-bms-htc.h"
+#else
+
 #ifndef __PM8XXX_BMS_H
 #define __PM8XXX_BMS_H
 
@@ -189,16 +193,6 @@ void pm8921_bms_battery_removed(void);
  *			for reporting soc.
  */
 void pm8921_bms_battery_inserted(void);
-
-#ifdef CONFIG_HTC_BATT_8960
-int pm8921_bms_get_batt_current(int *result);
-
-int pm8921_store_hw_reset_reason(int is_hw_reset);
-int pm8921_bms_get_batt_soc(int *result);
-int pm8921_bms_get_batt_cc(int *result);
-int pm8921_bms_get_attr_text(char *buf, int size);
-#endif
-
 #else
 static inline int pm8921_bms_get_vsense_avg(int *result)
 {
@@ -247,31 +241,7 @@ static inline int pm8921_bms_get_current_max(void)
 }
 static inline void pm8921_bms_battery_removed(void) {}
 static inline void pm8921_bms_battery_inserted(void) {}
-
-#ifdef CONFIG_HTC_BATT_8960
-static inline int pm8921_bms_get_batt_current(int *result)
-{
-	return -ENXIO;
-}   
-
-static inline int pm8921_store_hw_reset_reason(int is_hw_reset)
-{
-	return -ENXIO;
-}   
-
-static inline int pm8921_bms_get_batt_soc(int *result)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_bms_get_batt_cc(int *result)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_bms_get_attr_text(char *buf, int size)
-{
-	return 0;
-}   
-#endif
 #endif
 
+#endif
 #endif

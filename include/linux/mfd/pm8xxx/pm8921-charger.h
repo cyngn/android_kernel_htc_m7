@@ -10,15 +10,14 @@
  * GNU General Public License for more details.
  */
 
+#ifdef CONFIG_HTC_BATT_8960
+#include "pm8921-charger-htc.h"
+#else
+
 #ifndef __PM8XXX_CHARGER_H
 #define __PM8XXX_CHARGER_H
-
 #include <linux/errno.h>
 #include <linux/power_supply.h>
-
-#ifdef CONFIG_HTC_BATT_8960
-#include <mach/htc_charger.h>
-#endif
 
 #define PM8921_CHARGER_DEV_NAME	"pm8921-charger"
 
@@ -203,14 +202,6 @@ enum pm8921_charger_source {
 	PM8921_CHG_SRC_DC,
 };
 
-#ifdef CONFIG_HTC_BATT_8960
-struct pm8921_charger_batt_param {
-	unsigned int max_voltage;
-	unsigned int cool_bat_voltage;
-	unsigned int warm_bat_voltage;
-};
-#endif
-
 #if defined(CONFIG_PM8921_CHARGER) || defined(CONFIG_PM8921_CHARGER_MODULE)
 void pm8921_charger_vbus_draw(unsigned int mA);
 int pm8921_charger_register_vbus_sn(void (*callback)(int));
@@ -329,53 +320,6 @@ int pm8921_usb_ovp_disable(int disable);
  * batfet this will return 0.
  */
 int pm8921_is_batfet_closed(void);
-
-#ifdef CONFIG_HTC_BATT_8960
-int pm8921_get_batt_voltage(int *result);
-
-int pm8921_set_chg_ovp(int is_ovp);
-
-int pm8921_get_batt_temperature(int *result);
-
-int pm8921_get_batt_id(int *result);
-
-int pm8921_is_batt_temperature_fault(int *result);
-
-int pm8921_is_batt_temp_fault_disable_chg(int *result);
-
-int pm8921_is_pwrsrc_under_rating(int *result);
-
-int pm8921_is_batt_full(int *result);
-
-int pm8921_is_chg_safety_timer_timeout(int *result);
-
-int pm8921_is_batt_full_eoc_stop(int *result);
-
-int pm8921_get_charging_source(int *result);
-
-int pm8921_get_charging_enabled(int *result);
-
-int pm8921_pwrsrc_enable(bool enable);
-
-int pm8921_set_pwrsrc_and_charger_enable(enum htc_power_source_type src,
-		bool chg_enable, bool pwrsrc_enable); 
-		
-int pm8921_limit_charge_enable(bool enable);
-
-int pm8921_is_charger_ovp(int *result);
-
-int pm8921_dump_all(void);
-
-int pm8921_charger_get_attr_text(char *buf, int size);
-
-
-int pm8921_set_hsml_target_ma(int target_ma);
-
-int pm8921_charger_get_attr_text_with_ext_charger(char *buf, int size);
-
-int pm8921_gauge_get_attr_text(char *buf, int size);
-#endif 
-
 #else
 static inline void pm8921_charger_vbus_draw(unsigned int mA)
 {
@@ -448,94 +392,7 @@ static inline int pm8921_is_batfet_closed(void)
 {
 	return 1;
 }
-
-#ifdef CONFIG_HTC_BATT_8960
-static inline int pm8921_get_batt_voltage(int *result)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_set_chg_ovp(int is_ovp)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_get_batt_temperature(int *result)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_get_batt_id(int *result)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_is_batt_temperature_fault(int *result)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_is_batt_temp_fault_disable_chg(int *result)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_is_pwrsrc_under_rating(int *result)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_is_batt_full(int *result)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_is_chg_safety_timer_timeout(int *result)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_is_batt_full_eoc_stop(int *result)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_get_charging_enabled(int *result)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_pwrsrc_enable(bool enable)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_set_pwrsrc_and_charger_enable(enum htc_power_source_type src,
-		bool chg_enable, bool pwrsrc_enable)
-{       
-	return -ENXIO;
-}   
-static inline int pm8921_limit_charge_enable(bool enable)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_is_charger_ovp(int *result)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_charger_get_attr_text(char *buf, int size)
-{
-	return -ENXIO;
-}   
-static inline int pm8921_gauge_get_attr_text(char *buf, int size)
-{
-	return -ENXIO;
-}   
-
-static inline int pm8921_set_hsml_target_ma(int target_ma)
-{
-	return -ENXIO;
-}   
-
-static inline int pm8921_charger_get_attr_text_with_ext_charger(char *buf, int size)
-{
-	return -ENXIO;
-}   
-
-static inline int pm8921_dump_all(void)
-{
-	return -ENXIO;
-}   
 #endif
 
 #endif
-
 #endif

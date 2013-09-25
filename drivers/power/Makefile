@@ -53,15 +53,20 @@ obj-$(CONFIG_BATTERY_QCIBAT)    += qci_battery.o
 obj-$(CONFIG_BATTERY_BQ27520)	+= bq27520_fuelgauger.o
 obj-$(CONFIG_BATTERY_BQ27541)	+= bq27541_fuelgauger.o
 obj-$(CONFIG_SMB137B_CHARGER)   += smb137b.o
-obj-$(CONFIG_PM8XXX_CCADC)	+= pm8xxx-ccadc.o
-#ifdef CONFIG_PM8921_BMS
-#ifndef CONFIG_HTC_BATT_8960
-#		obj-y += pm8921-bms.o
-#else
-#		obj-y += pm8921-bms-htc.o
-#endif
-#endif
-obj-$(CONFIG_PM8921_BMS)		+= pm8921-bms.o
+ifdef CONFIG_PM8XXX_CCADC
+ifndef CONFIG_HTC_BATT_8960
+	obj-y += pm8xxx-ccadc.o
+else
+	obj-y += pm8xxx-ccadc-htc.o
+endif
+endif
+ifdef CONFIG_PM8921_BMS
+ifndef CONFIG_HTC_BATT_8960
+		obj-y += pm8921-bms.o
+else
+		obj-y += pm8921-bms-htc.o
+endif
+endif
 ifdef CONFIG_PM8921_CHARGER
 ifndef CONFIG_HTC_BATT_8960
 		obj-y += pm8921-charger.o
