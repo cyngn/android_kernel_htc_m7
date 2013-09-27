@@ -61,6 +61,8 @@ enum usb_otg_event {
 	 * within TB_SRP_FAIL time.
 	 */
 	OTG_EVENT_NO_RESP_FOR_SRP,
+
+	OTG_EVENT_INSUFFICIENT_POWER,
 };
 
 enum usb_phy_events {
@@ -148,6 +150,12 @@ struct usb_phy {
 	/* for non-OTG B devices: set transceiver into suspend mode */
 	int	(*set_suspend)(struct usb_phy *x,
 				int suspend);
+
+	int (*send_event)(struct usb_phy *phy,
+			enum usb_otg_event event);
+			
+	void    (*notify_usb_attached)(void);
+	void    (*notify_usb_disabled)(void);
 
 };
 

@@ -15,6 +15,10 @@
  *
  */
 
+#ifdef CONFIG_USB_MSM_OTG_HTC
+#include "msm_hsusb_htc.h"
+#else
+
 #ifndef __ASM_ARCH_MSM_HSUSB_H
 #define __ASM_ARCH_MSM_HSUSB_H
 
@@ -464,5 +468,6 @@ static inline int msm_ep_unconfig(struct usb_ep *ep)
 {
 	return -ENODEV;
 }
+#endif
 #endif
 #endif

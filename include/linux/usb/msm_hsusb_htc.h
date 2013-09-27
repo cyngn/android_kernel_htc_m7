@@ -232,11 +232,13 @@ struct msm_hsic_host_platform_data {
 	unsigned strobe;
 	unsigned data;
 	struct msm_bus_scale_pdata *bus_scale_table;
+	unsigned log2_irq_thresh;
 	u32 swfi_latency;
 };
 
 struct msm_usb_host_platform_data {
 	unsigned int power_budget;
+	int pmic_gpio_dp_irq;
 	unsigned int dock_connect_irq;
 };
 
@@ -266,8 +268,26 @@ enum usb_bam {
 	HSIC_BAM,
 };
 
+#ifdef CONFIG_USB_DWC3_MSM
 int msm_ep_config(struct usb_ep *ep);
 int msm_ep_unconfig(struct usb_ep *ep);
-int msm_data_fifo_config(struct usb_ep *ep, u32 addr, u32 size);
+int msm_data_fifo_config(struct usb_ep *ep, u32 addr, u32 size,
+		u8 dst_pipe_idx);
+#else
+static inline int msm_data_fifo_config(struct usb_ep *ep, u32 addr, u32 size,
+	u8 dst_pipe_idx)
+{
+	return -ENODEV;
+}
 
+static inline int msm_ep_config(struct usb_ep *ep)
+{
+	return -ENODEV;
+}
+
+static inline int msm_ep_unconfig(struct usb_ep *ep)
+{
+	return -ENODEV;
+}
+#endif
 #endif
